@@ -1,8 +1,10 @@
 use crate::common::download_file;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::fs::File;
 use std::io::{Error, Read};
 use tokio::runtime::Runtime;
+use crate::m3u8::HlsM3u8;
 
 struct VideoTs {
     index: i32,
@@ -63,10 +65,23 @@ fn read_base_info(file_name: &str) -> Result<BaseInfo, std::io::Error> {
     Ok(base_info)
 }
 
+fn file_exists(file_name:String) -> bool {
+    let res = File::open(file_name);
+    return match res {
+        Ok(data) => {
+            println!("{:?}----", data.metadata());
+            return true
+        },
+        Err(e) => {
+            return false
+        }
+    }
+}
+
 pub mod download {
     use crate::combine::parse::handle_combine_ts;
     use crate::common::{is_url, now, replace_last_segment};
-    use crate::download::{download_ts_file, download_ts_file_async, read_base_info, BaseInfo, VideoTs};
+    use crate::download::{download_ts_file, download_ts_file_async, file_exists, read_base_info, BaseInfo, VideoTs};
     use crate::m3u8::m3u8::{parse_local, parse_url};
     use std::fmt::{format, Error};
     use std::{fs, io};
@@ -97,10 +112,16 @@ pub mod download {
                 let _ = base_info_obj.generate(base_info.to_string());
             }
         }
-        if is_url(url.clone()) {
-            hls_m3u = parse_url(url.clone(), folder.clone(), m3u8_file_name.clone()).await;
-        } else {
-            hls_m3u = parse_local(url.clone(), String::default(), folder.clone()).await;
+        if file_exists(m3u8_file_name.clone()) {
+            println!("now is read local m3u8 files");
+            hls_m3u = parse_local(format!("{}", m3u8_file_name.clone()), url.clone(), m3u8_file_name.clone()).await;
+            println!("hls_m3u = {:?}----", hls_m3u.list.len());
+        }else{
+            if is_url(url.clone()) {
+                hls_m3u = parse_url(url.clone(), folder.clone(), m3u8_file_name.clone()).await;
+            } else {
+                hls_m3u = parse_local(url.clone(), String::default(), folder.clone()).await;
+            }
         }
         let mut extension= "ts".to_string();
         if !hls_m3u.x_map_uri.is_empty() {
