@@ -1,5 +1,6 @@
 use crate::common::download_file;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, Read};
@@ -10,6 +11,7 @@ struct VideoTs {
     index: i32,
     url: String,
     extension:String,
+    headers: HashMap<String, String>,
 }
 
 impl VideoTs {
@@ -18,13 +20,15 @@ impl VideoTs {
             index: 0,
             url: "".to_string(),
             extension: "".to_string(),
+            headers: HashMap::new(),
         }
     }
 
-    pub fn set(&mut self, index: i32, url: String, extension:String) {
+    pub fn set(&mut self, index: i32, url: String, extension:String, headers: HashMap<String, String>) {
         self.index = index;
         self.url = url.clone();
-        self.extension = extension.clone()
+        self.extension = extension.clone();
+        self.headers = headers;
     }
 }
 
@@ -32,6 +36,8 @@ impl VideoTs {
 pub struct BaseInfo {
     pub url: String,
     pub m3u8_name: String,
+    #[serde(default)]
+    pub header: HashMap<String, String>,
 }
 
 impl BaseInfo {
@@ -39,6 +45,7 @@ impl BaseInfo {
         BaseInfo {
             url: "".to_string(),
             m3u8_name: "".to_string(),
+            header: HashMap::new(),
         }
     }
     pub fn set_host(&mut self, url: String) {
@@ -47,6 +54,10 @@ impl BaseInfo {
 
     pub fn set_m3u8_name(&mut self, m3u8_name: String) {
         self.m3u8_name = m3u8_name
+    }
+
+    pub fn set_header(&mut self, header: HashMap<String, String>) {
+        self.header = header
     }
 
     pub fn generate(self, folder: String) -> Result<(), Error> {
@@ -85,6 +96,7 @@ pub mod download {
     use crate::m3u8::m3u8::{parse_local, parse_url};
     use std::fmt::{format, Error};
     use std::{fs, io};
+    use std::collections::HashMap;
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use crate::cmd::cmd::check_video_validity;
@@ -100,27 +112,30 @@ pub mod download {
         let base_info = "base_info.json";
         let mut m3u8_file_name = format!("{}.m3u8", now());
         let mut base_info_obj = BaseInfo::new();
+        let mut headers = HashMap::new();
         let read_base_info = read_base_info(&base_info.to_string());
         match read_base_info {
             Ok(base_info_data) => {
                 m3u8_file_name = base_info_data.m3u8_name;
                 url = base_info_data.url;
+                headers = base_info_data.header;
             }
             Err(_) => {
                 base_info_obj.set_host(url.clone());
                 base_info_obj.set_m3u8_name(m3u8_file_name.clone());
+                base_info_obj.set_header(headers.clone());
                 let _ = base_info_obj.generate(base_info.to_string());
             }
         }
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");
-            hls_m3u = parse_local(format!("{}", m3u8_file_name.clone()), url.clone(), m3u8_file_name.clone()).await;
+            hls_m3u = parse_local(format!("{}", m3u8_file_name.clone()), url.clone(), m3u8_file_name.clone(), headers.clone()).await;
             println!("hls_m3u = {:?}----", hls_m3u.list.len());
         }else{
             if is_url(url.clone()) {
-                hls_m3u = parse_url(url.clone(), folder.clone(), m3u8_file_name.clone()).await;
+                hls_m3u = parse_url(url.clone(), folder.clone(), m3u8_file_name.clone(), headers.clone()).await;
             } else {
-                hls_m3u = parse_local(url.clone(), String::default(), folder.clone()).await;
+                hls_m3u = parse_local(url.clone(), String::default(), folder.clone(), headers.clone()).await;
             }
         }
         let mut extension= "ts".to_string();
@@ -136,6 +151,7 @@ pub mod download {
             video.url = x_url;
             video.index = -1;
             video.extension = extension.clone();
+            video.headers = headers.clone();
             download_ts_file_async(video).await;
         }
         hls_m3u.set_extension(extension.clone());
@@ -143,7 +159,7 @@ pub mod download {
         let mut ts_index = 0;
         for x in &hls_m3u.list {
             let mut ts = VideoTs::new();
-            ts.set(ts_index, x.clone(), extension.clone());
+            ts.set(ts_index, x.clone(), extension.clone(), headers.clone());
             ts_list.push(ts);
             ts_index += 1;
         }
@@ -250,7 +266,7 @@ fn download_ts_file(video_ts: VideoTs) -> bool {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
                 println!("download ts file {}", video_ts.url.clone());
-                let res = download_file(video_ts.url.clone(), download_file_name, ).await;
+                let res = download_file(video_ts.url.clone(), download_file_name, &video_ts.headers).await;
                 return match res {
                     Ok(data) => data,
                     _ => false,
@@ -270,7 +286,7 @@ async fn download_ts_file_async(video_ts: VideoTs) ->  bool {
         }
         Err(_) => {
             println!("download ts file {}", video_ts.url.clone());
-            let res = download_file(video_ts.url.clone(), download_file_name, ).await;
+            let res = download_file(video_ts.url.clone(), download_file_name, &video_ts.headers).await;
             return match res {
                 Ok(data) => data,
                 _ => false,

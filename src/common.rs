@@ -2,6 +2,8 @@ use std::fmt::{format, Error};
 use std::fs;
 use std::fs::File;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use url::Url;
 
 pub fn now() -> u64 {
@@ -38,8 +40,28 @@ pub fn replace_last_segment(url: &str, replacement: &str) -> String {
     components.join("/")
 }
 
-pub async fn download_file(url: String, file_name: String) -> Result<bool, Error> {
-    let resp = reqwest::get(&url).await.expect("get url data error");
+pub async fn download_file(url: String, file_name: String, headers: &HashMap<String, String>) -> Result<bool, Error> {
+    let mut header_map = HeaderMap::new();
+    for (key, value) in headers {
+        let name = HeaderName::from_bytes(key.as_bytes());
+        let val = HeaderValue::from_str(value.as_str());
+        match (name, val) {
+            (Ok(parsed_name), Ok(parsed_value)) => {
+                header_map.insert(parsed_name, parsed_value);
+            }
+            _ => {
+                println!("skip invalid header: {}", key);
+            }
+        }
+    }
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .headers(header_map)
+        .send()
+        .await
+        .expect("get url data error");
     if resp.status() == 200 {
         let body = resp.bytes().await;
         match body {
