@@ -34,3 +34,28 @@ media-tool-rs download --url=https://zmis.me/xxx.m3u8 --folder=1222
 ```
 media-tool-rs cut -i=/your/local/file.mp4 -s=5 -d=10
 ```
+
+## Desktop (Tauri)
+
+新增了 `desktop/` 桌面端：
+
+- 支持按 `download / combine / cut` 创建任务并调用 CLI 执行
+- 支持任务状态展示、按类型筛选、重试与删除（运行中任务禁止删除）
+- 支持 m3u8 地址播放并可配置请求 Header
+- 支持 m3u 地址解析，展示频道列表并选择播放
+
+### 启动方式
+
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
+
+### CLI 可执行文件说明
+
+桌面端优先按以下顺序查找并执行 CLI：
+
+1. 环境变量 `MEDIA_TOOL_CLI` 指定的路径
+2. `../target/debug/media-tool-rs`
+3. 回退到 `cargo run --manifest-path ../Cargo.toml -- <args>`

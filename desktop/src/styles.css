@@ -1,0 +1,176 @@
+:root {
+  font-family: Inter, Arial, sans-serif;
+  color: #101828;
+  background: #f3f5f9;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  margin: 8px 0 16px;
+}
+
+h2 {
+  margin: 0 0 12px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #d0d5dd;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+input,
+select,
+button,
+textarea {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+button {
+  cursor: pointer;
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.two-col > * {
+  flex: 1;
+  min-width: 220px;
+}
+
+.between {
+  justify-content: space-between;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.hidden {
+  display: none;
+}
+
+.tabs button {
+  background: #667085;
+}
+
+.tabs button.active {
+  background: #1d4ed8;
+}
+
+.task-item {
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.meta {
+  font-size: 12px;
+  color: #475467;
+  margin: 4px 0;
+  word-break: break-all;
+}
+
+.badge {
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #fff;
+}
+
+.badge.pending {
+  background: #f59e0b;
+}
+
+.badge.running {
+  background: #2563eb;
+}
+
+.badge.success {
+  background: #16a34a;
+}
+
+.badge.failed,
+.badge.canceled {
+  background: #dc2626;
+}
+
+.header-row {
+  align-items: stretch;
+}
+
+.header-row button {
+  width: 90px;
+  flex: initial;
+  background: #475467;
+}
+
+.channel-list {
+  margin: 10px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.channel-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  gap: 10px;
+}
+
+video {
+  width: 100%;
+  max-height: 420px;
+  background: #000;
+  border-radius: 10px;
+}
+
+#feedback {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #334155;
+}
+
+.error {
+  color: #b42318;
+}

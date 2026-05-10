@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>media-tool-rs desktop</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <h1>media-tool-rs Desktop</h1>
+
+      <section class="card">
+        <h2>创建任务</h2>
+        <div class="row two-col">
+          <label>
+            任务类型
+            <select id="task-type">
+              <option value="download">download</option>
+              <option value="combine">combine</option>
+              <option value="cut">cut</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="download-form" class="task-form">
+          <label>URL<input id="download-url" placeholder="https://example.com/video.m3u8" /></label>
+          <div class="row two-col">
+            <label>保存目录<input id="download-folder" placeholder="folder" /></label>
+            <label>输出文件名<input id="download-target" placeholder="output.mp4" /></label>
+          </div>
+          <div class="row two-col">
+            <label>并发数<input id="download-concurrent" type="number" min="1" value="10" /></label>
+            <label class="checkbox"><input id="download-ffmpeg" type="checkbox" /> ffmpeg_download</label>
+          </div>
+        </div>
+
+        <div id="combine-form" class="task-form hidden">
+          <label>正则文件名<input id="combine-reg-name" placeholder="IMG_(.*).MOV" /></label>
+          <div class="row two-col">
+            <label>开始索引<input id="combine-start" type="number" /></label>
+            <label>结束索引<input id="combine-end" type="number" /></label>
+          </div>
+          <div class="row two-col">
+            <label>输出文件名<input id="combine-target" placeholder="merged.mp4" /></label>
+            <label>same_param_index<input id="combine-same-index" type="number" value="-1" /></label>
+          </div>
+        </div>
+
+        <div id="cut-form" class="task-form hidden">
+          <label>输入文件<input id="cut-input" placeholder="/path/file.mp4" /></label>
+          <div class="row two-col">
+            <label>开始秒数<input id="cut-start" type="number" min="0" value="0" /></label>
+            <label>时长<input id="cut-duration" type="number" min="1" value="3" /></label>
+          </div>
+          <label>输出文件名<input id="cut-target" placeholder="cut.mp4" /></label>
+        </div>
+
+        <button id="create-task">创建并执行</button>
+      </section>
+
+      <section class="card">
+        <h2>任务列表</h2>
+        <div class="row tabs" id="task-tabs">
+          <button data-type="all" class="active">全部</button>
+          <button data-type="download">download</button>
+          <button data-type="combine">combine</button>
+          <button data-type="cut">cut</button>
+        </div>
+        <div id="tasks"></div>
+      </section>
+
+      <section class="card">
+        <h2>m3u8 / m3u 播放器</h2>
+        <label>播放地址<input id="player-url" placeholder="https://example.com/live.m3u8 或 m3u" /></label>
+
+        <div class="header-editor">
+          <h3>Headers</h3>
+          <div id="header-list"></div>
+          <button id="add-header">添加 Header</button>
+        </div>
+
+        <div class="row">
+          <button id="parse-playlist">解析列表</button>
+          <button id="play-url">播放当前地址</button>
+        </div>
+
+        <div id="playlist-info"></div>
+        <div id="channel-list" class="channel-list"></div>
+
+        <video id="player" controls playsinline></video>
+      </section>
+
+      <pre id="feedback"></pre>
+    </main>
+  </body>
+</html>
