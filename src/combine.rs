@@ -1,13 +1,15 @@
 pub mod parse {
-    use crate::cmd::cmd::{clear_temp_files, combine, combine_ts, get_video_info, transcode_video_to_spec_params};
+    use crate::cmd::cmd::{
+        clear_temp_files, combine, combine_ts, get_video_info, transcode_video_to_spec_params,
+    };
     use crate::common::now;
     use crate::m3u8::HlsM3u8Method;
+    use image::EncodableLayout;
     use openssl::symm::{decrypt, Cipher};
     use std::fmt::Error;
     use std::fs::{read, File, OpenOptions};
-    use std::io::{BufReader, BufWriter};
     use std::io::prelude::*;
-    use image::EncodableLayout;
+    use std::io::{BufReader, BufWriter};
     use tempfile::tempdir;
 
     pub fn get_reg_files(
@@ -64,8 +66,13 @@ pub mod parse {
         set_width: i32,
         set_height: i32,
     ) -> Result<bool, Error> {
-        if same_param_index == -1 && set_a_b == 0 && set_v_b == 0 && set_fps == 0
-            && set_width == 0 && set_height == 0 {
+        if same_param_index == -1
+            && set_a_b == 0
+            && set_v_b == 0
+            && set_fps == 0
+            && set_width == 0
+            && set_height == 0
+        {
             white_to_files(files.clone(), file_name.clone()).expect("写入文件失败");
             return combine(file_name.clone(), target_file_name);
         }
@@ -95,9 +102,7 @@ pub mod parse {
                         height = data_info.height;
                     }
                 }
-                None => {
-                    return Ok(false)
-                }
+                None => return Ok(false),
             }
         } else {
             if set_a_b > 0 {
@@ -116,19 +121,48 @@ pub mod parse {
                 height = set_height
             }
         }
-        println!("ab {} vb {}  fps {} width {} height {}", a_b, v_b, fps, width, height);
-        transcode_videos_to_same_params(files.clone(), file_name.clone(), target_file_name, a_b, v_b, fps, width, height)
+        println!(
+            "ab {} vb {}  fps {} width {} height {}",
+            a_b, v_b, fps, width, height
+        );
+        transcode_videos_to_same_params(
+            files.clone(),
+            file_name.clone(),
+            target_file_name,
+            a_b,
+            v_b,
+            fps,
+            width,
+            height,
+        )
     }
 
     // cargo run -- combine -r="/Users/meow.zang/RustroverProjects/ffmpeg-tool-rs/images/video/(.*).mp4" --reg-file-start=1 --reg-file-end=2 --same_param_index=1
-    fn transcode_videos_to_same_params(files: Vec<String>, file: String, target: String, a_b: i32, v_b: i32, fps: i32, width: i32, height: i32) -> Result<bool, Error> {
+    fn transcode_videos_to_same_params(
+        files: Vec<String>,
+        file: String,
+        target: String,
+        a_b: i32,
+        v_b: i32,
+        fps: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<bool, Error> {
         let mut index: i32 = 0;
         let mut result_files = vec![];
         // 先将ts文件转成mp4
         for i in files.clone() {
             let file_name = format!("_temp_{}.mp4", index);
             result_files.push(file_name.clone());
-            let _ = transcode_video_to_spec_params(i.clone(), file_name.clone(), a_b, v_b, fps, width, height);
+            let _ = transcode_video_to_spec_params(
+                i.clone(),
+                file_name.clone(),
+                a_b,
+                v_b,
+                fps,
+                width,
+                height,
+            );
             index += 1;
         }
         // 在将mp4文件合并成一个文件
@@ -141,9 +175,7 @@ pub mod parse {
                 }
                 Ok(data)
             }
-            Err(e) => {
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 
@@ -152,7 +184,11 @@ pub mod parse {
         Ok(true)
     }
 
-    fn mp4_files_combine_one(mp4_files: Vec<String>, file: String, target: String) -> Result<bool, Error> {
+    fn mp4_files_combine_one(
+        mp4_files: Vec<String>,
+        file: String,
+        target: String,
+    ) -> Result<bool, Error> {
         println!("file {}, target {}", file.clone(), target.clone());
         white_to_files(mp4_files.clone(), file.clone()).expect("写入文件失败");
         combine(file.clone(), target)
@@ -219,7 +255,7 @@ pub mod parse {
         key: String,
         iv: String,
         sequence: i32,
-        extension:String,
+        extension: String,
     ) -> Result<bool, Error> {
         let key_file = format!("./{}.bin", key.clone());
         println!("pass key {}, iv {}", key_file.clone(), iv.clone());
@@ -227,16 +263,11 @@ pub mod parse {
         println!("----映射的文件大小: {}", key_data.len());
         let slice: &[u8] = &key_data; // 转为 &[u8]
         println!("----映射的文件大小: {} {}", key_data.len(), slice.len());
-        let files = get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end).expect("解析失败");
+        let files = get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
+            .expect("解析失败");
         let mut start_se = sequence;
         for i in files.clone() {
-            let _ = decrypt_video_file(
-                slice,
-                iv.clone().as_bytes(),
-                start_se as u8,
-                &i,
-            )
-                .await;
+            let _ = decrypt_video_file(slice, iv.clone().as_bytes(), start_se as u8, &i).await;
             start_se += 1;
         }
         return combine_without_crypto(
@@ -245,7 +276,7 @@ pub mod parse {
             reg_end,
             target_name,
         )
-            .await;
+        .await;
     }
 
     fn append_file_to_output(input_path: &str, output: &mut BufWriter<File>) -> Result<(), Error> {
@@ -258,21 +289,26 @@ pub mod parse {
         Ok(())
     }
 
-    fn m4s_file_combine(reg_name: String,
-                             reg_start: i32,
-                             reg_end: i32,
-                             target_name: String, x_map_uri: String,extension:String) -> Result<bool,Error> {
+    fn m4s_file_combine(
+        reg_name: String,
+        reg_start: i32,
+        reg_end: i32,
+        target_name: String,
+        x_map_uri: String,
+        extension: String,
+    ) -> Result<bool, Error> {
         // 输出文件，覆盖或创建新文件
         let output_file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(target_name.clone()).expect("create file error");
+            .open(target_name.clone())
+            .expect("create file error");
 
         let mut writer = BufWriter::new(output_file);
 
         // 要合并的文件列表（顺序非常重要）
-        let mut files:Vec<String> = vec![];
+        let mut files: Vec<String> = vec![];
         if !x_map_uri.is_empty() {
             files.push(format!("-1.{}", extension.clone()));
         }
@@ -326,10 +362,17 @@ pub mod parse {
         iv: String,
         sequence: i32,
         x_map_uri: String,
-        extension:String,
+        extension: String,
     ) -> Result<bool, Error> {
         if !x_map_uri.is_empty() {
-            return m4s_file_combine(reg_name.clone(), reg_start, reg_end, target_name.clone(), x_map_uri.clone(), extension.clone());
+            return m4s_file_combine(
+                reg_name.clone(),
+                reg_start,
+                reg_end,
+                target_name.clone(),
+                x_map_uri.clone(),
+                extension.clone(),
+            );
         }
         match method {
             Some(HlsM3u8Method::Aes128) => {
@@ -341,9 +384,9 @@ pub mod parse {
                     key.clone(),
                     iv.clone(),
                     sequence,
-                    extension.clone()
+                    extension.clone(),
                 )
-                    .await
+                .await
             }
             Some(HlsM3u8Method::SampleAes) => {
                 println!("simple aes");
@@ -356,7 +399,7 @@ pub mod parse {
                     iv.clone(),
                     sequence,
                 )
-                    .await
+                .await
             }
             None => {
                 println!("no crypto");

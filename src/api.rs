@@ -1,6 +1,4 @@
-use crate::cmd::cmd::{
-    check_base_info_exists, clear_temp_files, cut, download as ffmpeg_download,
-};
+use crate::cmd::cmd::{check_base_info_exists, clear_temp_files, cut, download as ffmpeg_download};
 use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_files};
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
@@ -122,7 +120,13 @@ async fn health() -> impl Responder {
 }
 
 async fn list_tasks(state: web::Data<AppState>) -> impl Responder {
-    let mut tasks = state.tasks.read().await.values().cloned().collect::<Vec<_>>();
+    let mut tasks = state
+        .tasks
+        .read()
+        .await
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
     tasks.sort_by(|left, right| right.id.cmp(&left.id));
     HttpResponse::Ok().json(tasks)
 }
@@ -388,7 +392,8 @@ async fn run_cut_task(
             format!("./cut/{}", target_file_name)
         };
 
-        let success = cut(input, start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
+        let success =
+            cut(input, start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
         if !success {
             return Err("截取视频失败".to_string());
         }

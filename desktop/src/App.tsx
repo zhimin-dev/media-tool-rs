@@ -101,7 +101,7 @@ function App() {
           setTasks(records)
           setError('')
         }
-      } catch (requestError) {
+      } catch {
         if (alive) {
           setError('无法连接后端接口，请先执行 media-tool-rs serve --port 8080')
         }
@@ -158,7 +158,7 @@ function App() {
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar sx={{ justifyContent: 'space-between', borderBottom: 1, borderColor: 'divider' }}>
           <Box>
-            <Typography variant="h5" fontWeight={700}>
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>
               media-tool-rs 控制台
             </Typography>
             <Typography variant="body2" color="text.secondary">
@@ -525,14 +525,13 @@ function App() {
                       <Stack
                         direction={{ xs: 'column', md: 'row' }}
                         spacing={2}
-                        justifyContent="space-between"
+                        sx={{ justifyContent: 'space-between' }}
                       >
                         <Box sx={{ flex: 1 }}>
                           <Stack
                             direction={{ xs: 'column', sm: 'row' }}
                             spacing={1}
-                            alignItems={{ xs: 'flex-start', sm: 'center' }}
-                            sx={{ mb: 1 }}
+                            sx={{ mb: 1, alignItems: { xs: 'flex-start', sm: 'center' } }}
                           >
                             <Typography variant="h6">{task.title}</Typography>
                             <Chip
@@ -562,13 +561,25 @@ function App() {
                           ) : null}
                         </Box>
                         <Box sx={{ minWidth: 180 }}>
-                          <Typography variant="caption" display="block" color="text.secondary">
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: 'block' }}
+                          >
                             创建时间：{formatTimestamp(task.created_at)}
                           </Typography>
-                          <Typography variant="caption" display="block" color="text.secondary">
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: 'block' }}
+                          >
                             开始时间：{formatTimestamp(task.started_at)}
                           </Typography>
-                          <Typography variant="caption" display="block" color="text.secondary">
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: 'block' }}
+                          >
                             完成时间：{formatTimestamp(task.finished_at)}
                           </Typography>
                         </Box>

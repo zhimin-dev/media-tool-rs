@@ -7,10 +7,10 @@ pub struct HlsM3u8 {
     pub method: Option<HlsM3u8Method>,
     pub iv: String,
     original_url: String,
-    folder: String, // 文件夹
+    folder: String,    // 文件夹
     pub sequence: i32, //序号
-    pub x_map_uri:String,
-    pub extension:String,//视频扩展字段
+    pub x_map_uri: String,
+    pub extension: String, //视频扩展字段
     headers: HashMap<String, String>,
 }
 
@@ -40,7 +40,12 @@ impl HlsM3u8 {
         self.list = list
     }
 
-    pub fn set_original_url(&mut self, original_url: String, folder: String, headers: HashMap<String, String>) {
+    pub fn set_original_url(
+        &mut self,
+        original_url: String,
+        folder: String,
+        headers: HashMap<String, String>,
+    ) {
         self.original_url = original_url;
         self.folder = folder;
         self.headers = headers;
@@ -88,14 +93,19 @@ impl HlsM3u8 {
     }
 
     async fn convert_local_key(&mut self) {
-        let res = download_file(self.key.clone(), format!("./{}.bin", self.folder.clone()), &self.headers).await;
+        let res = download_file(
+            self.key.clone(),
+            format!("./{}.bin", self.folder.clone()),
+            &self.headers,
+        )
+        .await;
         return match res {
             Ok(data) => {
                 if data {
                     println!("key 下载成功")
-                } else{
-                   println!("key 下载出错")
-               }
+                } else {
+                    println!("key 下载出错")
+                }
             }
             _ => {
                 println!("key 下载出错")
@@ -113,14 +123,24 @@ pub mod m3u8 {
     use std::fs::File;
     use std::io::Read;
 
-    pub async fn parse_local(local_file: String, target_url: String, folder: String, headers: HashMap<String, String>) -> HlsM3u8 {
+    pub async fn parse_local(
+        local_file: String,
+        target_url: String,
+        folder: String,
+        headers: HashMap<String, String>,
+    ) -> HlsM3u8 {
         let mut data = File::open(local_file).expect("file not exists");
         let mut str = String::default();
         let _ = data.read_to_string(&mut str);
         str_to_urls(str, target_url.clone(), folder.clone(), headers).await
     }
 
-    async fn str_to_urls(str: String, url: String, folder: String, headers: HashMap<String, String>) -> HlsM3u8 {
+    async fn str_to_urls(
+        str: String,
+        url: String,
+        folder: String,
+        headers: HashMap<String, String>,
+    ) -> HlsM3u8 {
         let mut hls_m3u8 = HlsM3u8::new();
         hls_m3u8.set_original_url(url.clone(), folder.clone(), headers);
         let mut list = vec![];
@@ -200,7 +220,12 @@ pub mod m3u8 {
         "".to_string()
     }
 
-    pub async fn parse_url(url: String, folder_name: String, m3u8_file_name: String, headers: HashMap<String, String>) -> HlsM3u8 {
+    pub async fn parse_url(
+        url: String,
+        folder_name: String,
+        m3u8_file_name: String,
+        headers: HashMap<String, String>,
+    ) -> HlsM3u8 {
         let hls_m3u8 = HlsM3u8::new();
         let local_file = format!("./{}", m3u8_file_name);
         match download_file(url.clone(), local_file.clone(), &headers).await {
@@ -212,7 +237,7 @@ pub mod m3u8 {
                         folder_name.clone(),
                         headers,
                     )
-                        .await
+                    .await
                 } else {
                     hls_m3u8
                 }

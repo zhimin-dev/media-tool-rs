@@ -1,6 +1,6 @@
 import { Alert, Box, Paper, Typography } from '@mui/material'
 import Hls from 'hls.js'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type M3u8PlayerProps = {
   url: string
@@ -9,6 +9,23 @@ type M3u8PlayerProps = {
 function M3u8Player({ url }: M3u8PlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [error, setError] = useState<string>('')
+  const sanitizedUrl = useMemo(() => sanitizeM3u8Url(url), [url])
+  const supportsNativeHls = useMemo(() => {
+    const video = document.createElement('video')
+    return Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
+  }, [])
+  const helperMessage = useMemo(() => {
+    if (!url) {
+      return ''
+    }
+    if (!sanitizedUrl) {
+      return '仅支持 http/https 的 m3u8 链接'
+    }
+    if (!supportsNativeHls && !Hls.isSupported()) {
+      return '当前浏览器不支持 m3u8 播放'
+    }
+    return error
+  }, [error, sanitizedUrl, supportsNativeHls, url])
 
   useEffect(() => {
     const video = videoRef.current
@@ -21,22 +38,21 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     video.removeAttribute('src')
     video.load()
 
-    if (!url) {
+    if (!sanitizedUrl) {
       return
     }
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url
+      video.src = sanitizedUrl
       return
     }
 
     if (!Hls.isSupported()) {
-      setError('当前浏览器不支持 m3u8 播放')
       return
     }
 
     const hls = new Hls()
-    hls.loadSource(url)
+    hls.loadSource(sanitizedUrl)
     hls.attachMedia(video)
     hls.on(Hls.Events.ERROR, (_, data) => {
       if (data.fatal) {
@@ -47,7 +63,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     return () => {
       hls.destroy()
     }
-  }, [url])
+  }, [sanitizedUrl])
 
   return (
     <Paper variant="outlined" sx={{ p: 2.5, height: '100%' }}>
@@ -57,7 +73,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         支持在线播放 m3u8 链接，可用于任务创建前预览。
       </Typography>
-      {error ? <Alert sx={{ mb: 2 }}>{error}</Alert> : null}
+      {helperMessage ? <Alert sx={{ mb: 2 }}>{helperMessage}</Alert> : null}
       <Box
         sx={{
           backgroundColor: '#000',
@@ -77,3 +93,20 @@ function M3u8Player({ url }: M3u8PlayerProps) {
 }
 
 export default M3u8Player
+
+function sanitizeM3u8Url(value: string) {
+  if (!value.trim()) {
+    return ''
+  }
+
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString()
+    }
+  } catch {
+    return ''
+  }
+
+  return ''
+}
