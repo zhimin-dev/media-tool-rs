@@ -34,3 +34,38 @@ media-tool-rs download --url=https://zmis.me/xxx.m3u8 --folder=1222
 ```
 media-tool-rs cut -i=/your/local/file.mp4 -s=5 -d=10
 ```
+
+## 可视化界面
+
+项目新增了一个 React + Material UI 前端，目录在 `/tmp/workspace/zhimin-dev/media-tool-rs/desktop`。
+
+### 1. 启动后端接口
+
+在项目根目录执行：
+
+```bash
+cargo run -- serve --port=8080
+```
+
+这会启动可视化界面所需的任务接口，支持：
+
+- 新建下载、合并、截取任务
+- 查询任务状态和最终输出路径
+- 顺序执行任务，避免下载时目录切换冲突
+
+### 2. 启动 React 前端
+
+```bash
+cd desktop
+npm install
+npm run dev
+```
+
+默认开发地址是 `http://127.0.0.1:5173`，Vite 已代理 `/api` 到 `http://127.0.0.1:8080`。
+
+### 3. 前端能力
+
+- 可视化创建 `download` / `combine` / `cut` 任务
+- 实时查看任务状态、命令预览和输出结果
+- 支持在线播放 m3u8 链接
+- 适合在 macOS、Windows 上运行

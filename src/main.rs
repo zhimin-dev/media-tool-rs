@@ -1,5 +1,6 @@
 extern crate core;
 
+mod api;
 mod cmd;
 mod combine;
 mod common;
@@ -10,7 +11,7 @@ use crate::cmd::cmd::{check_base_info_exists, clear_temp_files, cut, download};
 use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_files};
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
-use clap::{arg, Args as clapArgs, Parser, Subcommand};
+use clap::{Args as clapArgs, Parser, Subcommand};
 use std::{env};
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -34,6 +35,8 @@ enum Commands {
     Download(DownloadArgs),
     /// 截取视频
     Cut(CutArgs),
+    /// 启动可视化任务接口
+    Serve(ServeArgs),
 }
 
 #[derive(clapArgs)]
@@ -203,6 +206,13 @@ pub struct DownloadArgs {
     download_dir: String,
 }
 
+#[derive(clapArgs)]
+pub struct ServeArgs {
+    /// 接口服务端口
+    #[arg(long = "port", default_value_t = 8080)]
+    port: u16,
+}
+
 
 fn path_to_md5(url_str: &str) -> Option<String> {
     // 尝试解析 URL
@@ -312,6 +322,9 @@ pub async fn main() {
         }
         Commands::Download(mut args) => {
             args.download(current_dir).await;
+        }
+        Commands::Serve(args) => {
+            api::run_server(args.port).await.expect("启动服务失败");
         }
     }
 }
