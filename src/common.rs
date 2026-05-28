@@ -1,9 +1,9 @@
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use std::collections::HashMap;
 use std::fmt::{format, Error};
 use std::fs;
 use std::fs::File;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::HashMap;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use url::Url;
 
 pub fn now() -> u64 {
@@ -40,7 +40,11 @@ pub fn replace_last_segment(url: &str, replacement: &str) -> String {
     components.join("/")
 }
 
-pub async fn download_file(url: String, file_name: String, headers: &HashMap<String, String>) -> Result<bool, Error> {
+pub async fn download_file(
+    url: String,
+    file_name: String,
+    headers: &HashMap<String, String>,
+) -> Result<bool, Error> {
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
         let name = HeaderName::from_bytes(key.as_bytes());
@@ -66,15 +70,16 @@ pub async fn download_file(url: String, file_name: String, headers: &HashMap<Str
         let body = resp.bytes().await;
         match body {
             Ok(bytes) => {
-                fs::write(file_name.clone(), bytes).expect(format!("write file error {}", file_name.clone()).as_str());
+                fs::write(file_name.clone(), bytes)
+                    .expect(format!("write file error {}", file_name.clone()).as_str());
                 Ok(true)
-            },
+            }
             Err(e) => {
                 println!("get data error");
                 Ok(false)
             }
         }
-    }else{
+    } else {
         println!("download file status is not 200, now is {}", resp.status());
         Ok(false)
     }

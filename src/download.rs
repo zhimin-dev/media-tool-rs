@@ -1,16 +1,16 @@
 use crate::common::download_file;
+use crate::m3u8::HlsM3u8;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, Read};
 use tokio::runtime::Runtime;
-use crate::m3u8::HlsM3u8;
 
 struct VideoTs {
     index: i32,
     url: String,
-    extension:String,
+    extension: String,
     headers: HashMap<String, String>,
 }
 
@@ -24,7 +24,13 @@ impl VideoTs {
         }
     }
 
-    pub fn set(&mut self, index: i32, url: String, extension:String, headers: HashMap<String, String>) {
+    pub fn set(
+        &mut self,
+        index: i32,
+        url: String,
+        extension: String,
+        headers: HashMap<String, String>,
+    ) {
         self.index = index;
         self.url = url.clone();
         self.extension = extension.clone();
@@ -76,30 +82,30 @@ fn read_base_info(file_name: &str) -> Result<BaseInfo, std::io::Error> {
     Ok(base_info)
 }
 
-fn file_exists(file_name:String) -> bool {
+fn file_exists(file_name: String) -> bool {
     let res = File::open(file_name);
     return match res {
         Ok(data) => {
             println!("{:?}----", data.metadata());
-            return true
-        },
-        Err(e) => {
-            return false
+            return true;
         }
-    }
+        Err(e) => return false,
+    };
 }
 
 pub mod download {
+    use crate::cmd::cmd::check_video_validity;
     use crate::combine::parse::handle_combine_ts;
     use crate::common::{is_url, now, replace_last_segment};
-    use crate::download::{download_ts_file, download_ts_file_async, file_exists, read_base_info, BaseInfo, VideoTs};
+    use crate::download::{
+        download_ts_file, download_ts_file_async, file_exists, read_base_info, BaseInfo, VideoTs,
+    };
     use crate::m3u8::m3u8::{parse_local, parse_url};
-    use std::fmt::{format, Error};
-    use std::{fs, io};
     use std::collections::HashMap;
+    use std::fmt::{format, Error};
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
-    use crate::cmd::cmd::check_video_validity;
+    use std::{fs, io};
 
     pub async fn fast_download(
         pass_url: String,
@@ -129,16 +135,34 @@ pub mod download {
         }
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");
-            hls_m3u = parse_local(format!("{}", m3u8_file_name.clone()), url.clone(), m3u8_file_name.clone(), headers.clone()).await;
+            hls_m3u = parse_local(
+                format!("{}", m3u8_file_name.clone()),
+                url.clone(),
+                m3u8_file_name.clone(),
+                headers.clone(),
+            )
+            .await;
             println!("hls_m3u = {:?}----", hls_m3u.list.len());
-        }else{
+        } else {
             if is_url(url.clone()) {
-                hls_m3u = parse_url(url.clone(), folder.clone(), m3u8_file_name.clone(), headers.clone()).await;
+                hls_m3u = parse_url(
+                    url.clone(),
+                    folder.clone(),
+                    m3u8_file_name.clone(),
+                    headers.clone(),
+                )
+                .await;
             } else {
-                hls_m3u = parse_local(url.clone(), String::default(), folder.clone(), headers.clone()).await;
+                hls_m3u = parse_local(
+                    url.clone(),
+                    String::default(),
+                    folder.clone(),
+                    headers.clone(),
+                )
+                .await;
             }
         }
-        let mut extension= "ts".to_string();
+        let mut extension = "ts".to_string();
         if !hls_m3u.x_map_uri.is_empty() {
             extension = "m4s".to_string();
             println!("-------x-map-uri----{}", hls_m3u.x_map_uri.clone());
@@ -226,7 +250,7 @@ pub mod download {
             check_video_validity(f_name.as_str())
         } else {
             Ok(false)
-        }
+        };
     }
 
     pub fn create_folder(folder: String) -> io::Result<()> {
@@ -266,7 +290,9 @@ fn download_ts_file(video_ts: VideoTs) -> bool {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
                 println!("download ts file {}", video_ts.url.clone());
-                let res = download_file(video_ts.url.clone(), download_file_name, &video_ts.headers).await;
+                let res =
+                    download_file(video_ts.url.clone(), download_file_name, &video_ts.headers)
+                        .await;
                 return match res {
                     Ok(data) => data,
                     _ => false,
@@ -276,7 +302,7 @@ fn download_ts_file(video_ts: VideoTs) -> bool {
     }
 }
 
-async fn download_ts_file_async(video_ts: VideoTs) ->  bool {
+async fn download_ts_file_async(video_ts: VideoTs) -> bool {
     println!("---pass {}", video_ts.url.clone());
     let download_file_name = format!("./{}.{}", video_ts.index, video_ts.extension.clone());
     match fs::metadata(download_file_name.clone()) {
@@ -286,7 +312,8 @@ async fn download_ts_file_async(video_ts: VideoTs) ->  bool {
         }
         Err(_) => {
             println!("download ts file {}", video_ts.url.clone());
-            let res = download_file(video_ts.url.clone(), download_file_name, &video_ts.headers).await;
+            let res =
+                download_file(video_ts.url.clone(), download_file_name, &video_ts.headers).await;
             return match res {
                 Ok(data) => data,
                 _ => false,

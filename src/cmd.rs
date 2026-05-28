@@ -54,8 +54,8 @@ impl From<Ffprobe> for VideoInfo {
                             "{:.2}",
                             (year.parse::<f32>().unwrap()) / (month.parse::<f32>().unwrap())
                         )
-                            .parse::<f32>()
-                            .unwrap()
+                        .parse::<f32>()
+                        .unwrap()
                     }
                     None => {}
                 }
@@ -111,7 +111,11 @@ pub mod cmd {
         let clear_ext = vec!["ts", "m3u8", "txt"];
         let path_str = format!("./{}", folder_name.to_owned());
         let dir_path = Path::new(path_str.as_str());
-        println!("now path {}, pass dir {:?}", current_dir.as_os_str().to_str().unwrap(), dir_path);
+        println!(
+            "now path {}, pass dir {:?}",
+            current_dir.as_os_str().to_str().unwrap(),
+            dir_path
+        );
 
         if !dir_path.is_dir() {
             println!("-----path: {:?} is not dir", dir_path);
@@ -175,7 +179,15 @@ pub mod cmd {
 
     // ffmpeg -i input.mp4 -b:v <视频码率> -b:a <音频码率> -r <帧率> output.mp4
     // ffmpeg -i input.mp4 -vf "scale=1280:720" -b:v 1500k -b:a 192k -r 30 -c:v libx264 -c:a aac output.mp4
-    pub fn transcode_video_to_spec_params(file: String, target: String, a_b: i32, v_b: i32, fps: i32, width: i32, height: i32) -> Result<bool, Error> {
+    pub fn transcode_video_to_spec_params(
+        file: String,
+        target: String,
+        a_b: i32,
+        v_b: i32,
+        fps: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<bool, Error> {
         let mut binding = Command::new("ffmpeg");
         let res = binding
             .arg("-i")
@@ -230,19 +242,20 @@ pub mod cmd {
         }
     }
 
-    pub fn check_video_validity(file_path: &str) -> Result<bool,Error> {
+    pub fn check_video_validity(file_path: &str) -> Result<bool, Error> {
         let output = Command::new("ffprobe")
             .args(&["-v", "error", "-show_format", "-show_streams"])
             .arg(file_path)
             .stderr(Stdio::piped())
-            .output().unwrap();
+            .output()
+            .unwrap();
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         Ok(stderr.trim().is_empty())
     }
 
     pub fn get_video_info(file: &str) -> Option<VideoInfo> {
-        println!("pass file name： {}---",file);
+        println!("pass file name： {}---", file);
         let mut ffprobe = Command::new("ffprobe");
         let prob_result = ffprobe
             .arg("-v")

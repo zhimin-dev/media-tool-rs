@@ -1,5 +1,6 @@
 extern crate core;
 
+mod api;
 mod cmd;
 mod combine;
 mod common;
@@ -10,11 +11,11 @@ use crate::cmd::cmd::{check_base_info_exists, clear_temp_files, cut, download};
 use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_files};
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
-use clap::{arg, Args as clapArgs, Parser, Subcommand};
-use std::{env};
+use clap::{Args as clapArgs, Parser, Subcommand};
+use md5;
+use std::env;
 use std::path::{Path, PathBuf};
 use url::Url;
-use md5;
 
 #[derive(Parser)]
 #[command(name = "ffmpeg-tool-rs")]
@@ -34,6 +35,8 @@ enum Commands {
     Download(DownloadArgs),
     /// 截取视频
     Cut(CutArgs),
+    /// 启动可视化任务接口
+    Serve(ServeArgs),
 }
 
 #[derive(clapArgs)]
@@ -84,7 +87,13 @@ impl CutArgs {
             return;
         }
         let target = self.get_target();
-        let res = cut(self.input.clone(), self.start, self.duration, target.clone()).expect("处理失败");
+        let res = cut(
+            self.input.clone(),
+            self.start,
+            self.duration,
+            target.clone(),
+        )
+        .expect("处理失败");
         if res {
             println!("截取视频成功")
         } else {
@@ -153,7 +162,7 @@ impl CombineArgs {
             self.reg_name_start,
             self.reg_name_end,
         )
-            .expect("解析失败");
+        .expect("解析失败");
         let file_name = to_files().expect("生成文件失败");
         let target = self.get_target_folder();
         let res = combine_video(
@@ -167,7 +176,7 @@ impl CombineArgs {
             self.set_width,
             self.set_height,
         )
-            .expect("合并文件失败");
+        .expect("合并文件失败");
         if res {
             println!("合并文件成功")
         } else {
@@ -203,6 +212,12 @@ pub struct DownloadArgs {
     download_dir: String,
 }
 
+#[derive(clapArgs)]
+pub struct ServeArgs {
+    /// 接口服务端口
+    #[arg(long = "port", default_value_t = 8080)]
+    port: u16,
+}
 
 fn path_to_md5(url_str: &str) -> Option<String> {
     // 尝试解析 URL
@@ -221,7 +236,7 @@ impl DownloadArgs {
             let md5_str = path_to_md5(self.url.clone().as_str());
             if md5_str.is_some() {
                 folder_name = md5_str.unwrap()
-            }else{
+            } else {
                 folder_name = format!("{}", now());
             }
         }
@@ -253,8 +268,8 @@ impl DownloadArgs {
                         self.folder.clone(),
                         self.concurrent,
                     )
-                        .await
-                        .expect("下载失败");
+                    .await
+                    .expect("下载失败");
                 }
                 Err(e) => {
                     println!("创建{}文件夹出错,{}", folder_name.clone(), e);
@@ -262,7 +277,7 @@ impl DownloadArgs {
                 }
             }
         } else {
-            let full_file = format!("{}/{}",folder_name, file_name);
+            let full_file = format!("{}/{}", folder_name, file_name);
             println!("full file name = {}", full_file.clone());
             res = download(self.url.clone(), full_file.clone()).expect("下载失败");
         }
@@ -304,14 +319,15 @@ pub async fn main() {
     let current_dir = env::current_dir().unwrap();
     let args = Args::parse();
     match args.command {
-        Commands::Combine(mut args) => {
-            args.combine()
-        }
+        Commands::Combine(mut args) => args.combine(),
         Commands::Cut(mut args) => {
             args.cut();
         }
         Commands::Download(mut args) => {
             args.download(current_dir).await;
+        }
+        Commands::Serve(args) => {
+            api::run_server(args.port).await.expect("启动服务失败");
         }
     }
 }
