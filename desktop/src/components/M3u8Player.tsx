@@ -1,6 +1,7 @@
 import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
-import Hls from 'hls.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import videojs from 'video.js'
+import 'video.js/dist/video-js.css'
 
 type M3u8PlayerProps = {
   url: string
@@ -18,12 +19,10 @@ function isM3u8Url(url: string) {
 
 function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const playerRef = useRef<ReturnType<typeof videojs> | null>(null)
+  const requestHookRef = useRef<((options: VideoJsRequestOptions) => VideoJsRequestOptions) | null>(null)
   const [error, setError] = useState<string>('')
   const sanitizedUrl = useMemo(() => sanitizeVideoUrl(url), [url])
-  const supportsNativeHls = useMemo(() => {
-    const video = document.createElement('video')
-    return Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
-  }, [])
   const [isPlaying, setIsPlaying] = useState(false)
   const helperMessage = useMemo(() => {
     if (!url) {
@@ -32,11 +31,8 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
     if (!sanitizedUrl) {
       return '仅支持 http/https 链接'
     }
-    if (isM3u8Url(sanitizedUrl) && !supportsNativeHls && !Hls.isSupported()) {
-      return '当前浏览器不支持 m3u8 播放'
-    }
     return error
-  }, [error, sanitizedUrl, supportsNativeHls, url])
+  }, [error, sanitizedUrl, url])
 
   useEffect(() => {
     const video = videoRef.current
@@ -44,62 +40,111 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
       return
     }
 
+    const player = videojs(video, {
+      autoplay: false,
+      controls: true,
+      fluid: true,
+      preload: 'auto',
+      responsive: true,
+    })
+    playerRef.current = player
+
+    const syncPlayingState = () => {
+      setIsPlaying(!player.paused())
+    }
+    const handleError = () => {
+      setError(player.error()?.message ?? '播放器加载失败，请检查链接是否可访问')
+    }
+
+    player.on('play', syncPlayingState)
+    player.on('pause', syncPlayingState)
+    player.on('ended', syncPlayingState)
+    player.on('error', handleError)
+
+    return () => {
+      player.off('play', syncPlayingState)
+      player.off('pause', syncPlayingState)
+      player.off('ended', syncPlayingState)
+      player.off('error', handleError)
+      player.dispose()
+      playerRef.current = null
+      requestHookRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player) {
+      return
+    }
+
+    const removeRequestHook = () => {
+      const vhsXhr = getVhsXhr(player)
+      if (requestHookRef.current && vhsXhr?.offRequest) {
+        vhsXhr.offRequest(requestHookRef.current)
+      }
+      requestHookRef.current = null
+    }
+
     setError('')
-    video.pause()
-    video.removeAttribute('src')
-    video.load()
-
-    if (!sanitizedUrl) {
-      return
-    }
-
-    // For non-m3u8 URLs (e.g. local video served via API), play directly
-    if (!isM3u8Url(sanitizedUrl)) {
-      video.src = sanitizedUrl
-      return
-    }
-
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = sanitizedUrl
-      return
-    }
-
-    if (!Hls.isSupported()) {
-      return
-    }
+    setIsPlaying(false)
+    player.pause()
+    removeRequestHook()
 
     const hasHeaders = Object.keys(headers).length > 0
-    const hls = new Hls(
-      hasHeaders
-        ? {
-            xhrSetup: (xhr) => {
-              for (const [key, value] of Object.entries(headers)) {
-                xhr.setRequestHeader(key, value)
-              }
-            },
-          }
-        : {},
-    )
-    hls.loadSource(sanitizedUrl)
-    hls.attachMedia(video)
-    hls.on(Hls.Events.ERROR, (_, data) => {
-      if (data.fatal) {
-        setError('播放器加载失败，请检查 m3u8 链接是否可访问')
+    const handleXhrHooksReady = () => {
+      if (!hasHeaders || !isM3u8Url(sanitizedUrl)) {
+        return
       }
+
+      const hook = (options: VideoJsRequestOptions) => {
+        const beforeSend = options.beforeSend
+        options.beforeSend = (xhr) => {
+          beforeSend?.(xhr)
+          for (const [key, value] of Object.entries(headers)) {
+            xhr.setRequestHeader(key, value)
+          }
+        }
+        return options
+      }
+
+      const vhsXhr = getVhsXhr(player)
+      if (!vhsXhr?.onRequest) {
+        return
+      }
+
+      requestHookRef.current = hook
+      vhsXhr.onRequest(hook)
+    }
+
+    player.one('xhr-hooks-ready', handleXhrHooksReady)
+
+    if (!sanitizedUrl) {
+      player.src({ src: '' })
+      return () => {
+        player.off('xhr-hooks-ready', handleXhrHooksReady)
+        removeRequestHook()
+      }
+    }
+
+    player.src({
+      src: sanitizedUrl,
+      type: getVideoSourceType(sanitizedUrl),
     })
 
     return () => {
-      hls.destroy()
+      player.off('xhr-hooks-ready', handleXhrHooksReady)
+      removeRequestHook()
     }
-  }, [sanitizedUrl, headers])
+  }, [headers, sanitizedUrl])
 
   const handlePlay = async () => {
-    const video = videoRef.current
-    if (!video) {
+    const player = playerRef.current
+    if (!player) {
       return
     }
     try {
-      await video.play()
+      await player.play()
       setIsPlaying(true)
     } catch {
       setError('播放失败，请检查链接是否可访问')
@@ -107,16 +152,16 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
   }
 
   const handlePause = () => {
-    const video = videoRef.current
-    if (!video) {
+    const player = playerRef.current
+    if (!player) {
       return
     }
-    video.pause()
+    player.pause()
     setIsPlaying(false)
   }
 
   const handlePiP = async () => {
-    const video = videoRef.current
+    const video = playerRef.current?.el()?.querySelector('video')
     if (!video) {
       return
     }
@@ -138,7 +183,7 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
         在线播放
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        支持在线播放 m3u8 链接，可用于任务创建前预览。
+        使用 video.js 在线播放 m3u8 链接或本地视频，可用于任务创建前预览。
       </Typography>
       {helperMessage ? <Alert sx={{ mb: 2 }}>{helperMessage}</Alert> : null}
       <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
@@ -158,13 +203,15 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
           borderRadius: 2,
           overflow: 'hidden',
           minHeight: 280,
+          '& .video-js': {
+            width: '100%',
+            minHeight: 280,
+          },
         }}
       >
-        <video
-          ref={videoRef}
-          controls
-          style={{ display: 'block', width: '100%', minHeight: 280 }}
-        />
+        <div data-vjs-player>
+          <video ref={videoRef} className="video-js vjs-big-play-centered" />
+        </div>
       </Box>
     </Paper>
   )
@@ -192,4 +239,25 @@ function sanitizeVideoUrl(value: string) {
   }
 
   return ''
+}
+
+function getVideoSourceType(url: string) {
+  return isM3u8Url(url) ? 'application/x-mpegURL' : 'video/mp4'
+}
+
+type VideoJsRequestOptions = {
+  beforeSend?: (xhr: XMLHttpRequest) => void
+}
+
+function getVhsXhr(player: ReturnType<typeof videojs>) {
+  const tech = player.tech(true) as {
+    vhs?: {
+      xhr?: {
+        onRequest?: (callback: (options: VideoJsRequestOptions) => VideoJsRequestOptions) => void
+        offRequest?: (callback: (options: VideoJsRequestOptions) => VideoJsRequestOptions) => void
+      }
+    }
+  } | null
+
+  return tech?.vhs?.xhr
 }
