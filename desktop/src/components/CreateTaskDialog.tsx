@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
 import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset } from '../types'
 
@@ -65,7 +65,12 @@ function CreateTaskDialog({
               fullWidth
               label="输出文件名"
               value={downloadForm.target_file_name}
-              helperText="可选，不填会使用随机文件名；不带后缀时会自动补 .mp4"
+              helperText="可选，不填会使用随机文件名"
+              slotProps={{
+                input: {
+                  endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
+                },
+              }}
               onChange={(event) =>
                 onDownloadFormChange((current) => ({ ...current, target_file_name: event.target.value }))
               }
@@ -159,6 +164,16 @@ function CreateTaskDialog({
               value={combineForm.reg_name_end}
               onChange={(event) =>
                 onCombineFormChange((current) => ({ ...current, reg_name_end: Number(event.target.value) }))
+              }
+            />
+            <TextField
+              fullWidth
+              label="对齐参数索引"
+              type="number"
+              value={combineForm.same_param_index}
+              helperText="-1 表示不对齐；0 表示以第一个视频的码率/音频码率/fps 为准，后续视频转码后再合并，以此类推"
+              onChange={(event) =>
+                onCombineFormChange((current) => ({ ...current, same_param_index: Number(event.target.value) }))
               }
             />
           </Stack>
