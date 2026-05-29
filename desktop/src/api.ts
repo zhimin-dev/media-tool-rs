@@ -62,3 +62,14 @@ export async function saveHeaderPreset(request: HeaderPreset): Promise<HeaderPre
   })
   return parseResponse<HeaderPreset>(response)
 }
+
+export async function deleteHeaderPreset(host: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/header-presets/${encodeURIComponent(host)}`, {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || '删除预设失败')
+  }
+}

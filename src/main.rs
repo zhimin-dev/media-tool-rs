@@ -213,7 +213,7 @@ pub struct DownloadArgs {
     download_dir: String,
 
     /// 下载请求头，JSON 字符串，如 {"referer":"https://a.com","origin":"https://a.com"}
-    #[arg(long = "headers", default_value_t = String::from(""))]
+    #[arg(long = "header", alias = "headers", default_value_t = String::from(""))]
     headers: String,
 }
 
