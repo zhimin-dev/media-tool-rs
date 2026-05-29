@@ -22,6 +22,8 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
   const playerHostRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<ReturnType<typeof videojs> | null>(null)
   const requestHookRef = useRef<((options: VideoJsRequestOptions) => VideoJsRequestOptions) | null>(null)
+  const waitingRecoveryTimerRef = useRef<number | null>(null)
+  const isRecoveringRef = useRef(false)
   const [error, setError] = useState<string>('')
   const preferNativeHls = useMemo(() => preferNativeHlsPlayback(), [])
   const [useNativeHls, setUseNativeHls] = useState(preferNativeHls)
@@ -70,23 +72,58 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
     const handleError = () => {
       setError(player.error()?.message ?? '播放器加载失败，请检查链接是否可访问')
     }
+    const clearWaitingRecoveryTimer = () => {
+      if (waitingRecoveryTimerRef.current) {
+        window.clearTimeout(waitingRecoveryTimerRef.current)
+        waitingRecoveryTimerRef.current = null
+      }
+    }
+    const handleWaiting = () => {
+      clearWaitingRecoveryTimer()
+      waitingRecoveryTimerRef.current = window.setTimeout(async () => {
+        if (!sanitizedUrl || isRecoveringRef.current || !playerRef.current) {
+          return
+        }
+
+        isRecoveringRef.current = true
+        setError('检测到播放卡顿，正在自动重连流媒体...')
+        try {
+          player.src({ src: sanitizedUrl, type: getVideoSourceType(sanitizedUrl) })
+          await player.play()
+          setError('')
+        } catch {
+          setError('自动重连失败，请点击播放重试')
+        } finally {
+          isRecoveringRef.current = false
+        }
+      }, 8000)
+    }
+    const handlePlaying = () => {
+      clearWaitingRecoveryTimer()
+      setError('')
+    }
 
     player.on('play', syncPlayingState)
     player.on('pause', syncPlayingState)
     player.on('ended', syncPlayingState)
     player.on('error', handleError)
+    player.on('waiting', handleWaiting)
+    player.on('playing', handlePlaying)
 
     return () => {
+      clearWaitingRecoveryTimer()
       player.off('play', syncPlayingState)
       player.off('pause', syncPlayingState)
       player.off('ended', syncPlayingState)
       player.off('error', handleError)
+      player.off('waiting', handleWaiting)
+      player.off('playing', handlePlaying)
       player.dispose()
       playerRef.current = null
       requestHookRef.current = null
       host.innerHTML = ''
     }
-  }, [useNativeHls])
+  }, [sanitizedUrl, useNativeHls])
 
   useEffect(() => {
     setUseNativeHls(preferNativeHls)
@@ -119,6 +156,16 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
       }
 
       const hook = (options: VideoJsRequestOptions) => {
+        if (options.uri && options.uri.toLowerCase().includes('.m3u8')) {
+          options.uri = appendCacheBust(options.uri)
+        }
+
+        options.headers = {
+          ...(options.headers ?? {}),
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        }
+
         const beforeSend = options.beforeSend
         options.beforeSend = (xhr) => {
           beforeSend?.(xhr)
@@ -305,7 +352,20 @@ function preferNativeHlsPlayback() {
 }
 
 type VideoJsRequestOptions = {
+  uri?: string
+  headers?: Record<string, string>
   beforeSend?: (xhr: XMLHttpRequest) => void
+}
+
+function appendCacheBust(uri: string) {
+  try {
+    const parsed = new URL(uri, window.location.href)
+    parsed.searchParams.set('_vjs_t', Date.now().toString())
+    return parsed.toString()
+  } catch {
+    const separator = uri.includes('?') ? '&' : '?'
+    return `${uri}${separator}_vjs_t=${Date.now()}`
+  }
 }
 
 function getVhsXhr(player: ReturnType<typeof videojs>) {
