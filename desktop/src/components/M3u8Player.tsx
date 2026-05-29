@@ -6,10 +6,19 @@ type M3u8PlayerProps = {
   url: string
 }
 
+function isM3u8Url(url: string) {
+  try {
+    const parsed = new URL(url)
+    return parsed.pathname.toLowerCase().includes('.m3u8')
+  } catch {
+    return false
+  }
+}
+
 function M3u8Player({ url }: M3u8PlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [error, setError] = useState<string>('')
-  const sanitizedUrl = useMemo(() => sanitizeM3u8Url(url), [url])
+  const sanitizedUrl = useMemo(() => sanitizeVideoUrl(url), [url])
   const supportsNativeHls = useMemo(() => {
     const video = document.createElement('video')
     return Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
@@ -20,9 +29,9 @@ function M3u8Player({ url }: M3u8PlayerProps) {
       return ''
     }
     if (!sanitizedUrl) {
-      return '仅支持 http/https 的 m3u8 链接'
+      return '仅支持 http/https 链接'
     }
-    if (!supportsNativeHls && !Hls.isSupported()) {
+    if (isM3u8Url(sanitizedUrl) && !supportsNativeHls && !Hls.isSupported()) {
       return '当前浏览器不支持 m3u8 播放'
     }
     return error
@@ -40,6 +49,12 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     video.load()
 
     if (!sanitizedUrl) {
+      return
+    }
+
+    // For non-m3u8 URLs (e.g. local video served via API), play directly
+    if (!isM3u8Url(sanitizedUrl)) {
+      video.src = sanitizedUrl
       return
     }
 
@@ -145,7 +160,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
 
 export default M3u8Player
 
-function sanitizeM3u8Url(value: string) {
+function sanitizeVideoUrl(value: string) {
   if (!value.trim()) {
     return ''
   }

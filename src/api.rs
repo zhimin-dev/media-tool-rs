@@ -3,7 +3,7 @@ use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -157,6 +157,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/header-presets", web::get().to(list_header_presets))
             .route("/api/header-presets", web::post().to(save_header_preset))
             .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
+            .route("/api/serve-video", web::get().to(serve_video))
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -168,6 +169,39 @@ async fn health() -> impl Responder {
         "status": "ok",
         "timestamp": now(),
     }))
+}
+
+#[derive(Deserialize)]
+struct ServeVideoQuery {
+    path: String,
+}
+
+async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> HttpResponse {
+    let requested_path = PathBuf::from(&query.path);
+
+    let Ok(canonical) = requested_path.canonicalize() else {
+        return HttpResponse::NotFound().body("file not found");
+    };
+
+    if !canonical.is_file() {
+        return HttpResponse::NotFound().body("not a file");
+    }
+
+    let extension = canonical
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    const ALLOWED_EXTENSIONS: [&str; 6] = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
+    if !ALLOWED_EXTENSIONS.contains(&extension.as_str()) {
+        return HttpResponse::Forbidden().body("unsupported file type");
+    }
+
+    match actix_files::NamedFile::open(&canonical) {
+        Ok(file) => file.into_response(&req),
+        Err(_) => HttpResponse::InternalServerError().body("failed to read file"),
+    }
 }
 
 async fn list_tasks(state: web::Data<AppState>) -> impl Responder {
