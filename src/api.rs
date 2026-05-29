@@ -137,6 +137,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks/{id}", web::delete().to(delete_task))
             .route("/api/header-presets", web::get().to(list_header_presets))
             .route("/api/header-presets", web::post().to(save_header_preset))
+            .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -313,6 +314,38 @@ async fn save_header_preset(
     }
 
     HttpResponse::Ok().json(preset)
+}
+
+async fn delete_header_preset(
+    state: web::Data<AppState>,
+    host: web::Path<String>,
+) -> impl Responder {
+    let normalized_host = host.trim().to_lowercase();
+    if normalized_host.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "host 不能为空",
+        }));
+    }
+
+    let persisted = {
+        let mut presets = state.header_presets.write().await;
+        let previous_len = presets.len();
+        presets.retain(|item| item.host != normalized_host);
+        if presets.len() == previous_len {
+            return HttpResponse::NotFound().json(serde_json::json!({
+                "message": "预设不存在",
+            }));
+        }
+        presets.clone()
+    };
+
+    if let Err(error) = write_header_presets(&state.header_presets_path, &persisted) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("删除预设失败: {}", error),
+        }));
+    }
+
+    HttpResponse::NoContent().finish()
 }
 
 async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
@@ -635,7 +668,10 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                 parts.push(format!("--download_dir={}", download_dir));
             }
             if !headers.is_empty() {
-                parts.push(format!("--headers={}", headers.len()));
+                parts.push(format!(
+                    "--header={}",
+                    shell_single_quote(&serialize_headers(headers))
+                ));
             }
             parts.join(" ")
         }
@@ -919,6 +955,14 @@ fn merge_header_presets(
 fn write_header_presets(path: &PathBuf, presets: &[HeaderPreset]) -> std::io::Result<()> {
     let content = serde_json::to_string_pretty(presets)?;
     fs::write(path, content)
+}
+
+fn serialize_headers(headers: &HashMap<String, String>) -> String {
+    serde_json::to_string(headers).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn normalize_headers(headers: HashMap<String, String>) -> HashMap<String, String> {
