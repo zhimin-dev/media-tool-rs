@@ -3,6 +3,7 @@ use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
+use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -120,11 +121,11 @@ struct AppState {
 impl AppState {
     fn new() -> Self {
         let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let tasks = load_download_tasks(current_dir.join("download"));
+        let tasks = load_download_tasks(current_dir.join("static").join("download"));
         let next_id = tasks.keys().copied().max().unwrap_or(0) + 1;
-        let header_presets_path = current_dir.join("header_presets.json");
+        let header_presets_path = current_dir.join("config").join("header_presets.json");
         if let Err(error) = ensure_header_presets_file(&header_presets_path) {
-            println!("failed to initialize header_presets.json: {}", error);
+            println!("failed to initialize config/header_presets.json: {}", error);
         }
         Self {
             tasks: Arc::new(RwLock::new(tasks)),
@@ -161,6 +162,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/header-presets", web::post().to(save_header_preset))
             .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
             .route("/api/serve-video", web::get().to(serve_video))
+            .service(Files::new("/static", "./static"))
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -656,7 +658,8 @@ async fn run_download_task(
 ) -> Result<TaskOutcome, String> {
     let current_dir = env::current_dir().map_err(|error| error.to_string())?;
     ensure_directory_exists(current_dir.join(&download_dir)).map_err(|error| error.to_string())?;
-    ensure_directory_exists(current_dir.join("cut")).map_err(|error| error.to_string())?;
+    ensure_directory_exists(current_dir.join("static").join("cut"))
+        .map_err(|error| error.to_string())?;
 
     let folder_name = resolve_download_folder_name(&url, &folder);
     let relative_folder = format!("./{}/{}", download_dir, folder_name);
@@ -784,12 +787,13 @@ async fn run_cut_task(
         }
 
         let current_dir = env::current_dir().map_err(|error| error.to_string())?;
-        ensure_directory_exists(current_dir.join("cut")).map_err(|error| error.to_string())?;
+        ensure_directory_exists(current_dir.join("static").join("cut"))
+            .map_err(|error| error.to_string())?;
 
         let target = if target_file_name.trim().is_empty() {
-            format!("./cut/{}.mp4", now())
+            format!("./static/cut/{}.mp4", now())
         } else {
-            format!("./cut/{}", target_file_name)
+            format!("./static/cut/{}", target_file_name)
         };
 
         let success =
@@ -874,7 +878,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             if *concurrent != 10 {
                 parts.push(format!("--concurrent={}", concurrent));
             }
-            if download_dir != "download" {
+            if download_dir != "static/download" {
                 parts.push(format!("--download_dir={}", download_dir));
             }
             if !headers.is_empty() {
@@ -969,7 +973,7 @@ fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>
             .as_ref()
             .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
             .or(current_dir.clone()),
-        TaskPayload::Cut { .. } => current_dir.map(|base| base.join("cut")),
+        TaskPayload::Cut { .. } => current_dir.map(|base| base.join("static").join("cut")),
     };
 
     let files = output_dir
@@ -1029,7 +1033,7 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
             target_file_name: String::new(),
             folder: folder_name.clone(),
             concurrent: 10,
-            download_dir: "download".to_string(),
+            download_dir: "static/download".to_string(),
             ffmpeg_download: false,
         });
         let result_path = detect_result_video(&folder_path);
@@ -1062,7 +1066,7 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
                 10
             },
             download_dir: if base_info.download_dir.trim().is_empty() {
-                "download".to_string()
+                "static/download".to_string()
             } else {
                 base_info.download_dir.clone()
             },
@@ -1210,6 +1214,9 @@ fn default_header_presets() -> Vec<HeaderPreset> {
 }
 
 fn ensure_header_presets_file(path: &PathBuf) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     if path.exists() {
         return Ok(());
     }

@@ -69,7 +69,7 @@ impl CutArgs {
     }
 
     pub fn get_folder(&self) -> &str {
-        "cut"
+        "static/cut"
     }
 
     fn get_target(&self) -> String {
@@ -209,7 +209,7 @@ pub struct DownloadArgs {
     concurrent: i32,
 
     /// 下载并发数
-    #[arg(long = "download_dir", default_value_t = String::from("download"))]
+    #[arg(long = "download_dir", default_value_t = String::from("static/download"))]
     download_dir: String,
 
     /// 下载请求头，JSON 字符串，如 {"referer":"https://a.com","origin":"https://a.com"}
@@ -320,8 +320,9 @@ impl DownloadArgs {
 
 // 初始化文件夹
 fn init_folder() {
-    ensure_directory_exists("./download");
-    ensure_directory_exists("./cut");
+    ensure_directory_exists("./static/download");
+    ensure_directory_exists("./static/cut");
+    ensure_directory_exists("./config");
 }
 
 fn ensure_directory_exists(path: &str) {

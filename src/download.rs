@@ -65,7 +65,7 @@ impl BaseInfo {
             target_file_name: "".to_string(),
             folder: "".to_string(),
             concurrent: 10,
-            download_dir: "download".to_string(),
+            download_dir: "static/download".to_string(),
             ffmpeg_download: false,
         }
     }

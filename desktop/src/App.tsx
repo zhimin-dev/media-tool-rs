@@ -84,7 +84,7 @@ const defaultDownloadForm: DownloadPayload = {
   target_file_name: '',
   folder: '',
   concurrent: 10,
-  download_dir: 'download',
+  download_dir: 'static/download',
   headers: {},
 }
 
@@ -117,7 +117,7 @@ const defaultBaseInfoForm: BaseInfo = {
   target_file_name: '',
   folder: '',
   concurrent: 10,
-  download_dir: 'download',
+  download_dir: 'static/download',
   ffmpeg_download: false,
 }
 
@@ -965,7 +965,7 @@ function buildCommandPreview(payload: TaskPayload) {
       if (payload.concurrent !== 10) {
         parts.push(`--concurrent=${payload.concurrent}`)
       }
-      if (payload.download_dir !== 'download') {
+      if (payload.download_dir !== 'static/download') {
         parts.push(`--download_dir=${payload.download_dir}`)
       }
       if (Object.keys(payload.headers).length > 0) {
