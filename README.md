@@ -29,6 +29,8 @@ media-tool-rs download --url=https://zmis.me/xxx.m3u8 --folder=1222
 media-tool-rs download --url=https://zmis.me/xxx.m3u8 --header='{"referer":"https://zmis.me","origin":"https://zmis.me"}'
 ```
 
+下载输出目录默认在 `static/download/<folder>/`。
+
 ### 截取视频
 
 -i 需要截取的视频
@@ -40,6 +42,8 @@ media-tool-rs download --url=https://zmis.me/xxx.m3u8 --header='{"referer":"http
 ```
 media-tool-rs cut -i=/your/local/file.mp4 -s=5 -d=10
 ```
+
+截取输出目录默认在 `static/cut/`。
 
 ## 可视化界面
 
@@ -58,6 +62,8 @@ cargo run -- serve --port=8080
 - 新建下载、合并、截取任务
 - 查询任务状态和最终输出路径
 - 顺序执行任务，避免下载时目录切换冲突
+- 自动托管 `./static` 目录，可直接访问 `http://127.0.0.1:8080/static/download/<folder>/<file>.mp4`
+- Header 预设配置文件保存在 `config/header_presets.json`
 
 ### 2. 启动 React 前端
 
