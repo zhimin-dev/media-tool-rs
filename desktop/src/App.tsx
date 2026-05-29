@@ -134,6 +134,8 @@ function App() {
   const [successMessage, setSuccessMessage] = useState('')
   const [loading, setLoading] = useState(false)
   const [playerUrl, setPlayerUrl] = useState('')
+  const [playerHeaderRows, setPlayerHeaderRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
+  const [taskRefreshInterval, setTaskRefreshInterval] = useState(3000)
   const [downloadForm, setDownloadForm] = useState(defaultDownloadForm)
   const [combineForm, setCombineForm] = useState(defaultCombineForm)
   const [cutForm, setCutForm] = useState(defaultCutForm)
@@ -170,12 +172,22 @@ function App() {
     }
 
     void loadTasks()
-    const timer = window.setInterval(() => void loadTasks(), 2000)
+    const timer = window.setInterval(() => void loadTasks(), taskRefreshInterval)
     return () => {
       alive = false
       window.clearInterval(timer)
     }
-  }, [])
+  }, [taskRefreshInterval])
+
+  const handleManualRefresh = async () => {
+    try {
+      const records = await fetchTasks()
+      setTasks(records)
+      setError('')
+    } catch {
+      setError('无法连接后端接口，请先执行 media-tool-rs serve --port 8080')
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -203,6 +215,25 @@ function App() {
     () => headerPresets.find((item) => item.host === selectedPresetHost) ?? null,
     [headerPresets, selectedPresetHost],
   )
+
+  const playerHeaders = useMemo(() => headerRowsToMap(playerHeaderRows), [playerHeaderRows])
+
+  const handlePlayerHeaderChange = (index: number, field: keyof HeaderRow, value: string) => {
+    setPlayerHeaderRows((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
+    )
+  }
+
+  const handleAddPlayerHeader = () => {
+    setPlayerHeaderRows((current) => [...current, { key: '', value: '' }])
+  }
+
+  const handleRemovePlayerHeader = (index: number) => {
+    setPlayerHeaderRows((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index)
+      return next.length > 0 ? next : [{ key: '', value: '' }]
+    })
+  }
 
   const currentPayload = useMemo<TaskPayload>(() => {
     if (activeTab === 'download') {
@@ -502,7 +533,34 @@ function App() {
                   value={playerUrl}
                   onChange={(event) => setPlayerUrl(event.target.value)}
                 />
-                <M3u8Player url={playerUrl} />
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">自定义 Header（可选）</Typography>
+                  {playerHeaderRows.map((row, index) => (
+                    <Stack key={index} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                      <TextField
+                        fullWidth
+                        label="Header 名称"
+                        value={row.key}
+                        onChange={(event) => handlePlayerHeaderChange(index, 'key', event.target.value)}
+                      />
+                      <TextField
+                        fullWidth
+                        label="Header 值"
+                        value={row.value}
+                        onChange={(event) => handlePlayerHeaderChange(index, 'value', event.target.value)}
+                      />
+                      <Button color="error" variant="outlined" onClick={() => handleRemovePlayerHeader(index)}>
+                        删除
+                      </Button>
+                    </Stack>
+                  ))}
+                  <Box>
+                    <Button variant="text" onClick={handleAddPlayerHeader}>
+                      添加 Header
+                    </Button>
+                  </Box>
+                </Stack>
+                <M3u8Player url={playerUrl} headers={playerHeaders} />
               </Stack>
             </Paper>
           ) : activeTab === 'headers' ? (
@@ -610,9 +668,33 @@ function App() {
                 {createTitle}
               </Button>
               <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                  任务列表
-                </Typography>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={1}
+                  sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', mb: 2 }}
+                >
+                  <Typography variant="h6">任务列表</Typography>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Button variant="outlined" size="small" onClick={() => void handleManualRefresh()}>
+                      手动刷新
+                    </Button>
+                    <FormControl size="small" sx={{ minWidth: 120 }}>
+                      <InputLabel id="refresh-interval-label">刷新间隔</InputLabel>
+                      <Select
+                        labelId="refresh-interval-label"
+                        label="刷新间隔"
+                        value={taskRefreshInterval}
+                        onChange={(event) => setTaskRefreshInterval(Number(event.target.value))}
+                      >
+                        <MenuItem value={3000}>3 秒</MenuItem>
+                        <MenuItem value={5000}>5 秒</MenuItem>
+                        <MenuItem value={10000}>10 秒</MenuItem>
+                        <MenuItem value={30000}>30 秒</MenuItem>
+                        <MenuItem value={60000}>60 秒</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                </Stack>
                 <Stack spacing={2}>
                   {filteredTasks.length === 0 ? (
                     <Alert severity="info">暂无任务</Alert>
@@ -622,13 +704,22 @@ function App() {
                         <CardContent>
                           <Stack spacing={1}>
                             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                              <Typography variant="subtitle1">{task.title}</Typography>
+                              <Typography variant="subtitle1">
+                                {task.payload.kind === 'download' && task.payload.folder
+                                  ? task.payload.folder
+                                  : task.title}
+                              </Typography>
                               <Chip
                                 size="small"
                                 label={statusLabelMap[task.status]}
                                 color={statusColorMap[task.status]}
                               />
                             </Stack>
+                            {task.payload.kind === 'download' && task.payload.target_file_name ? (
+                              <Typography variant="body2" color="text.secondary">
+                                {task.payload.target_file_name}
+                              </Typography>
+                            ) : null}
                             <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
                               {getTaskFileName(task)}
                             </Typography>
