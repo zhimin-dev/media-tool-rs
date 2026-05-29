@@ -1,33 +1,7 @@
 import MenuIcon from '@mui/icons-material/Menu'
-import {
-  Alert,
-  AppBar,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  IconButton,
-  InputLabel,
-  List,
-  ListItem,
-  Menu,
-  MenuItem,
-  Paper,
-  Select,
-  Stack,
-  TextField,
-  Toolbar,
-  Typography,
-} from '@mui/material'
+import { Alert, AppBar, Box, Container, IconButton, Menu, MenuItem, Stack, Toolbar, Typography } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   createTask,
   deleteHeaderPreset,
@@ -39,43 +13,26 @@ import {
   saveHeaderPreset,
   updateTaskBaseInfo,
 } from './api'
-import M3u8Player from './components/M3u8Player'
+import { appPages, getPageFromPath, getPathForPage, isTaskPage, pageLabelMap, type TaskPage } from './appPages'
+import BaseInfoEditDialog from './components/BaseInfoEditDialog'
+import CreateTaskDialog from './components/CreateTaskDialog'
+import TaskDetailDialog from './components/TaskDetailDialog'
+import CombinePage from './pages/CombinePage'
+import CutPage from './pages/CutPage'
+import DownloadPage from './pages/DownloadPage'
+import HeaderPresetsPage from './pages/HeaderPresetsPage'
+import WatchPage from './pages/WatchPage'
 import type {
+  BaseInfo,
   CombinePayload,
   CutPayload,
   DownloadPayload,
-  BaseInfo,
   HeaderPreset,
+  HeaderRow,
   TaskDetail,
   TaskPayload,
   TaskRecord,
-  TaskStatus,
 } from './types'
-
-type TaskTab = 'download' | 'combine' | 'cut' | 'headers' | 'watch'
-
-const tabLabelMap: Record<TaskTab, string> = {
-  download: '下载',
-  combine: '合并',
-  cut: '截取',
-  headers: 'Header 预设',
-  watch: '播放',
-}
-
-const statusLabelMap: Record<TaskStatus, string> = {
-  queued: '排队中',
-  running: '执行中',
-  success: '成功',
-  failed: '失败',
-}
-
-const statusColorMap: Record<TaskStatus, 'default' | 'primary' | 'success' | 'error' | 'warning'> =
-  {
-    queued: 'warning',
-    running: 'primary',
-    success: 'success',
-    failed: 'error',
-  }
 
 const defaultDownloadForm: DownloadPayload = {
   kind: 'download',
@@ -121,14 +78,12 @@ const defaultBaseInfoForm: BaseInfo = {
   ffmpeg_download: false,
 }
 
-type HeaderRow = {
-  key: string
-  value: string
-}
-
 function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
+  const currentTaskPage: TaskPage = isTaskPage(currentPage) ? currentPage : 'download'
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
-  const [activeTab, setActiveTab] = useState<TaskTab>('download')
   const [tasks, setTasks] = useState<TaskRecord[]>([])
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
@@ -153,6 +108,10 @@ function App() {
   const [presetFormHost, setPresetFormHost] = useState('')
   const [presetFormRows, setPresetFormRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
   const [editingPresetHost, setEditingPresetHost] = useState('')
+
+  useEffect(() => {
+    setCreateDialogOpen(false)
+  }, [currentPage])
 
   useEffect(() => {
     let alive = true
@@ -216,7 +175,40 @@ function App() {
     [headerPresets, selectedPresetHost],
   )
 
+  const matchedPresetHost = useMemo(() => getHostFromUrl(downloadForm.url), [downloadForm.url])
   const playerHeaders = useMemo(() => headerRowsToMap(playerHeaderRows), [playerHeaderRows])
+  const downloadTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'download'), [tasks])
+  const combineTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'combine'), [tasks])
+  const cutTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'cut'), [tasks])
+
+  const currentPayload = useMemo<TaskPayload>(() => {
+    if (currentTaskPage === 'download') {
+      return {
+        ...downloadForm,
+        headers: selectedPreset?.headers ?? {},
+      }
+    }
+    if (currentTaskPage === 'combine') {
+      return combineForm
+    }
+    return cutForm
+  }, [combineForm, currentTaskPage, cutForm, downloadForm, selectedPreset])
+
+  const createTitle = `新建${pageLabelMap[currentTaskPage]}任务`
+  const commandPreview = buildCommandPreview(currentPayload)
+  const baseInfoCommandPreview = useMemo(() => {
+    const payload: DownloadPayload = {
+      kind: 'download',
+      url: baseInfoForm.url,
+      ffmpeg_download: baseInfoForm.ffmpeg_download,
+      target_file_name: baseInfoForm.target_file_name,
+      folder: baseInfoForm.folder,
+      concurrent: baseInfoForm.concurrent,
+      download_dir: baseInfoForm.download_dir,
+      headers: baseInfoForm.header,
+    }
+    return buildCommandPreview(payload)
+  }, [baseInfoForm])
 
   const handlePlayerHeaderChange = (index: number, field: keyof HeaderRow, value: string) => {
     setPlayerHeaderRows((current) =>
@@ -234,29 +226,6 @@ function App() {
       return next.length > 0 ? next : [{ key: '', value: '' }]
     })
   }
-
-  const currentPayload = useMemo<TaskPayload>(() => {
-    if (activeTab === 'download') {
-      return {
-        ...downloadForm,
-        headers: selectedPreset?.headers ?? {},
-      }
-    }
-    if (activeTab === 'combine') {
-      return combineForm
-    }
-    return cutForm
-  }, [activeTab, combineForm, cutForm, downloadForm, selectedPreset])
-
-  const matchedPresetHost = useMemo(() => getHostFromUrl(downloadForm.url), [downloadForm.url])
-
-  const filteredTasks = useMemo(
-    () =>
-      tasks.filter((task) =>
-        activeTab === 'watch' ? true : task.payload.kind === activeTab,
-      ),
-    [activeTab, tasks],
-  )
 
   const handleCreateTask = async () => {
     setLoading(true)
@@ -296,15 +265,10 @@ function App() {
     })
   }
 
-  const handlePresetChange = (host: string) => {
-    setSelectedPresetHost(host)
-  }
-
   const handleEditPreset = (preset: HeaderPreset) => {
     setEditingPresetHost(preset.host)
     setPresetFormHost(preset.host)
     setPresetFormRows(mapToHeaderRows(preset.headers))
-    setActiveTab('headers')
   }
 
   const resetPresetForm = () => {
@@ -365,7 +329,7 @@ function App() {
   const handleRetry = async (taskId: number) => {
     try {
       const task = await retryTask(taskId)
-      setTasks((current) => [task, ...current.filter((t) => t.id !== taskId)])
+      setTasks((current) => [task, ...current.filter((item) => item.id !== taskId)])
       setSuccessMessage('已重新创建任务')
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : '重试失败'
@@ -408,7 +372,7 @@ function App() {
     setError('')
     const videoUrl = `/static/download/${task.payload.folder}/${task.payload.target_file_name}`
     setPlayerUrl(videoUrl)
-    setActiveTab('watch')
+    navigate(getPathForPage('watch'))
   }
 
   const handleOpenBaseInfoEditor = async (taskId: number) => {
@@ -460,9 +424,7 @@ function App() {
         ...baseInfoForm,
         header: parsedHeaders,
       })
-      setTasks((current) =>
-        current.map((task) => (task.id === updatedTask.id ? updatedTask : task)),
-      )
+      setTasks((current) => current.map((task) => (task.id === updatedTask.id ? updatedTask : task)))
       setSuccessMessage('base_info.json 已更新')
       setError('')
       setBaseInfoEditOpen(false)
@@ -472,21 +434,10 @@ function App() {
     }
   }
 
-  const createTitle = activeTab === 'watch' ? '新建任务' : `新建${tabLabelMap[activeTab]}任务`
-  const commandPreview = buildCommandPreview(currentPayload)
-  const baseInfoCommandPreview = useMemo(() => {
-    const payload: DownloadPayload = {
-      kind: 'download',
-      url: baseInfoForm.url,
-      ffmpeg_download: baseInfoForm.ffmpeg_download,
-      target_file_name: baseInfoForm.target_file_name,
-      folder: baseInfoForm.folder,
-      concurrent: baseInfoForm.concurrent,
-      download_dir: baseInfoForm.download_dir,
-      headers: baseInfoForm.header,
-    }
-    return buildCommandPreview(payload)
-  }, [baseInfoForm])
+  const handleMenuNavigate = (page: typeof appPages[number]) => {
+    setMenuAnchor(null)
+    navigate(page.path)
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
@@ -497,23 +448,16 @@ function App() {
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {tabLabelMap[activeTab]}
+              {pageLabelMap[currentPage]}
             </Typography>
           </Stack>
         </Toolbar>
       </AppBar>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
-        {(['download', 'combine', 'cut', 'headers', 'watch'] as TaskTab[]).map((tab) => (
-          <MenuItem
-            key={tab}
-            onClick={() => {
-              setActiveTab(tab)
-              setCreateDialogOpen(false)
-              setMenuAnchor(null)
-            }}
-          >
-            {tabLabelMap[tab]}
+        {appPages.map((page) => (
+          <MenuItem key={page.key} selected={page.key === currentPage} onClick={() => handleMenuNavigate(page)}>
+            {page.label}
           </MenuItem>
         ))}
       </Menu>
@@ -523,515 +467,140 @@ function App() {
           {error ? <Alert severity="error">{error}</Alert> : null}
           {successMessage ? <Alert severity="success">{successMessage}</Alert> : null}
 
-          {activeTab === 'watch' ? (
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Stack spacing={2}>
-                <TextField
-                  fullWidth
-                  label="m3u8 链接"
-                  value={playerUrl}
-                  onChange={(event) => setPlayerUrl(event.target.value)}
+          <Routes>
+            <Route path="/" element={<Navigate to={getPathForPage('download')} replace />} />
+            <Route
+              path="/download"
+              element={
+                <DownloadPage
+                  tasks={downloadTasks}
+                  refreshInterval={taskRefreshInterval}
+                  baseInfoEditLoading={baseInfoEditLoading}
+                  onCreate={() => setCreateDialogOpen(true)}
+                  onRefresh={() => void handleManualRefresh()}
+                  onRefreshIntervalChange={setTaskRefreshInterval}
+                  onView={(taskId) => void handleView(taskId)}
+                  onRetry={(taskId) => void handleRetry(taskId)}
+                  onDelete={(taskId) => void handleDelete(taskId)}
+                  onOpenVideo={handleOpenVideo}
+                  onEditFailedTask={(taskId) => void handleOpenBaseInfoEditor(taskId)}
                 />
-                <Stack spacing={1}>
-                  <Typography variant="subtitle2">自定义 Header（可选）</Typography>
-                  {playerHeaderRows.map((row, index) => (
-                    <Stack key={index} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                      <TextField
-                        fullWidth
-                        label="Header 名称"
-                        value={row.key}
-                        onChange={(event) => handlePlayerHeaderChange(index, 'key', event.target.value)}
-                      />
-                      <TextField
-                        fullWidth
-                        label="Header 值"
-                        value={row.value}
-                        onChange={(event) => handlePlayerHeaderChange(index, 'value', event.target.value)}
-                      />
-                      <Button color="error" variant="outlined" onClick={() => handleRemovePlayerHeader(index)}>
-                        删除
-                      </Button>
-                    </Stack>
-                  ))}
-                  <Box>
-                    <Button variant="text" onClick={handleAddPlayerHeader}>
-                      添加 Header
-                    </Button>
-                  </Box>
-                </Stack>
-                {
-                  playerUrl ? (
-                    <M3u8Player url={playerUrl} headers={playerHeaders} />
-                  ):''
-                }
-              </Stack>
-            </Paper>
-          ) : activeTab === 'headers' ? (
-            <Stack spacing={2}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Stack spacing={2}>
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={1}
-                    sx={{ justifyContent: 'space-between' }}
-                  >
-                    <Typography variant="h6">Header 预设列表</Typography>
-                    <Button variant="outlined" onClick={resetPresetForm}>
-                      新建预设
-                    </Button>
-                  </Stack>
-                  {headerPresets.length === 0 ? (
-                    <Alert severity="info">暂无预设</Alert>
-                  ) : (
-                    <Stack spacing={1}>
-                      {headerPresets.map((preset) => (
-                        <Card key={preset.host} variant="outlined">
-                          <CardContent>
-                            <Stack spacing={1}>
-                              <Typography variant="subtitle1">{preset.host}</Typography>
-                              <Typography
-                                variant="body2"
-                                sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
-                              >
-                                {JSON.stringify(preset.headers)}
-                              </Typography>
-                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                                <Button variant="outlined" size="small" onClick={() => handleEditPreset(preset)}>
-                                  编辑
-                                </Button>
-                                <Button
-                                  color="error"
-                                  variant="outlined"
-                                  size="small"
-                                  onClick={() => void handleDeletePreset(preset.host)}
-                                >
-                                  删除
-                                </Button>
-                              </Stack>
-                            </Stack>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </Stack>
-                  )}
-                </Stack>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Stack spacing={2}>
-                  <Typography variant="h6">{editingPresetHost ? '编辑预设' : '新建预设'}</Typography>
-                  <TextField
-                    fullWidth
-                    label="预设 Host"
-                    placeholder="例如 surrit.com"
-                    value={presetFormHost}
-                    onChange={(event) => setPresetFormHost(event.target.value)}
-                    helperText={matchedPresetHost ? `当前下载链接 host：${matchedPresetHost}` : undefined}
-                  />
-                  <Stack spacing={1}>
-                    <Typography variant="subtitle2">Header 列表</Typography>
-                    {presetFormRows.map((row, index) => (
-                      <Stack key={`${index}-${row.key}`} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                        <TextField
-                          fullWidth
-                          label="Header 名称"
-                          value={row.key}
-                          onChange={(event) => handlePresetHeaderChange(index, 'key', event.target.value)}
-                        />
-                        <TextField
-                          fullWidth
-                          label="Header 值"
-                          value={row.value}
-                          onChange={(event) => handlePresetHeaderChange(index, 'value', event.target.value)}
-                        />
-                        <Button color="error" variant="outlined" onClick={() => handleRemovePresetHeader(index)}>
-                          删除
-                        </Button>
-                      </Stack>
-                    ))}
-                    <Box>
-                      <Button variant="text" onClick={handleAddPresetHeader}>
-                        添加 Header
-                      </Button>
-                    </Box>
-                  </Stack>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <Button variant="contained" onClick={() => void handleSavePreset()}>
-                      保存预设
-                    </Button>
-                    <Button variant="outlined" onClick={resetPresetForm}>
-                      重置
-                    </Button>
-                  </Stack>
-                </Stack>
-              </Paper>
-            </Stack>
-          ) : (
-            <>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Stack
-                  direction={{ xs: 'column', sm: 'row' }}
-                  spacing={1}
-                  sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', mb: 2 }}
-                >
-                  <Typography variant="h6">任务列表</Typography>
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <Button variant="contained" size="small" onClick={() => setCreateDialogOpen(true)}>
-                      {createTitle}
-                    </Button>
-                    <Button variant="outlined" size="small" onClick={() => void handleManualRefresh()}>
-                      手动刷新
-                    </Button>
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                      <InputLabel id="refresh-interval-label">刷新间隔</InputLabel>
-                      <Select
-                        labelId="refresh-interval-label"
-                        label="刷新间隔"
-                        value={taskRefreshInterval}
-                        onChange={(event) => setTaskRefreshInterval(Number(event.target.value))}
-                      >
-                        <MenuItem value={3000}>3 秒</MenuItem>
-                        <MenuItem value={5000}>5 秒</MenuItem>
-                        <MenuItem value={10000}>10 秒</MenuItem>
-                        <MenuItem value={30000}>30 秒</MenuItem>
-                        <MenuItem value={60000}>60 秒</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                </Stack>
-                <Stack spacing={2}>
-                  {filteredTasks.length === 0 ? (
-                    <Alert severity="info">暂无任务</Alert>
-                  ) : (
-                    filteredTasks.map((task) => (
-                      <Card key={task.id} variant="outlined">
-                        <CardContent>
-                          <Stack spacing={1}>
-                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                              <Typography variant="subtitle1">
-                                {task.payload.kind === 'download' && task.payload.folder
-                                  ? task.payload.folder
-                                  : task.title}
-                              </Typography>
-                              <Chip
-                                size="small"
-                                label={statusLabelMap[task.status]}
-                                color={statusColorMap[task.status]}
-                              />
-                            </Stack>
-                            {task.payload.kind === 'download' && task.payload.target_file_name ? (
-                              <Typography variant="body2" color="text.secondary">
-                                {task.payload.target_file_name}
-                              </Typography>
-                            ) : null}
-                            <Typography variant="body2" color="text.secondary">
-                              {task.message ?? '等待结果'}
-                            </Typography>
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                              <Button variant="outlined" size="small" onClick={() => handleView(task.id)}>
-                                查看
-                              </Button>
-                              {task.payload.kind === 'download' &&
-                              task.status === 'success' &&
-                              task.result_path ? (
-                                <Button
-                                  variant="outlined"
-                                  size="small"
-                                  onClick={() => handleOpenVideo(task)}
-                                >
-                                  打开播放
-                                </Button>
-                              ) : null}
-                              {task.payload.kind === 'download' && task.status === 'failed' ? (
-                                <Button
-                                  variant="outlined"
-                                  size="small"
-                                  disabled={baseInfoEditLoading}
-                                  onClick={() => void handleOpenBaseInfoEditor(task.id)}
-                                >
-                                  编辑失败任务
-                                </Button>
-                              ) : null}
-                              <Button variant="outlined" size="small" onClick={() => void handleRetry(task.id)}>
-                                重试
-                              </Button>
-                              <Button color="error" variant="outlined" size="small" onClick={() => void handleDelete(task.id)}>
-                                删除
-                              </Button>
-                            </Stack>
-                          </Stack>
-                        </CardContent>
-                      </Card>
-                    ))
-                  )}
-                </Stack>
-              </Paper>
-            </>
-          )}
+              }
+            />
+            <Route
+              path="/combine"
+              element={
+                <CombinePage
+                  tasks={combineTasks}
+                  refreshInterval={taskRefreshInterval}
+                  baseInfoEditLoading={baseInfoEditLoading}
+                  onCreate={() => setCreateDialogOpen(true)}
+                  onRefresh={() => void handleManualRefresh()}
+                  onRefreshIntervalChange={setTaskRefreshInterval}
+                  onView={(taskId) => void handleView(taskId)}
+                  onRetry={(taskId) => void handleRetry(taskId)}
+                  onDelete={(taskId) => void handleDelete(taskId)}
+                />
+              }
+            />
+            <Route
+              path="/cut"
+              element={
+                <CutPage
+                  tasks={cutTasks}
+                  refreshInterval={taskRefreshInterval}
+                  baseInfoEditLoading={baseInfoEditLoading}
+                  onCreate={() => setCreateDialogOpen(true)}
+                  onRefresh={() => void handleManualRefresh()}
+                  onRefreshIntervalChange={setTaskRefreshInterval}
+                  onView={(taskId) => void handleView(taskId)}
+                  onRetry={(taskId) => void handleRetry(taskId)}
+                  onDelete={(taskId) => void handleDelete(taskId)}
+                />
+              }
+            />
+            <Route
+              path="/headers"
+              element={
+                <HeaderPresetsPage
+                  headerPresets={headerPresets}
+                  editingPresetHost={editingPresetHost}
+                  presetFormHost={presetFormHost}
+                  presetFormRows={presetFormRows}
+                  matchedPresetHost={matchedPresetHost}
+                  onPresetFormHostChange={setPresetFormHost}
+                  onPresetHeaderChange={handlePresetHeaderChange}
+                  onAddPresetHeader={handleAddPresetHeader}
+                  onRemovePresetHeader={handleRemovePresetHeader}
+                  onResetPresetForm={resetPresetForm}
+                  onSavePreset={() => void handleSavePreset()}
+                  onEditPreset={handleEditPreset}
+                  onDeletePreset={(host) => void handleDeletePreset(host)}
+                />
+              }
+            />
+            <Route
+              path="/watch"
+              element={
+                <WatchPage
+                  playerUrl={playerUrl}
+                  playerHeaders={playerHeaders}
+                  playerHeaderRows={playerHeaderRows}
+                  onPlayerUrlChange={setPlayerUrl}
+                  onPlayerHeaderChange={handlePlayerHeaderChange}
+                  onAddPlayerHeader={handleAddPlayerHeader}
+                  onRemovePlayerHeader={handleRemovePlayerHeader}
+                />
+              }
+            />
+            <Route path="*" element={<Navigate to={getPathForPage('download')} replace />} />
+          </Routes>
         </Stack>
       </Container>
 
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>{createTitle}</DialogTitle>
-        <DialogContent>
-          {activeTab === 'download' ? (
-            <Stack spacing={2} sx={{ pt: 1 }}>
-              <TextField
-                fullWidth
-                label="m3u8 链接"
-                value={downloadForm.url}
-                onChange={(event) => {
-                  const url = event.target.value
-                  setDownloadForm((current) => ({ ...current, url }))
-                }}
-              />
-              <TextField
-                fullWidth
-                label="输出文件名"
-                value={downloadForm.target_file_name}
-                onChange={(event) =>
-                  setDownloadForm((current) => ({ ...current, target_file_name: event.target.value }))
-                }
-              />
-              <TextField
-                fullWidth
-                label="任务文件夹"
-                value={downloadForm.folder}
-                onChange={(event) => setDownloadForm((current) => ({ ...current, folder: event.target.value }))}
-              />
-              <FormControl fullWidth>
-                <InputLabel id="header-preset-label">header 预设</InputLabel>
-                <Select
-                  labelId="header-preset-label"
-                  label="header 预设"
-                  value={selectedPresetHost}
-                  onChange={(event) => handlePresetChange(event.target.value)}
-                >
-                  <MenuItem value="">不使用预设</MenuItem>
-                  {headerPresets.map((preset) => (
-                    <MenuItem key={preset.host} value={preset.host}>
-                      {preset.host}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              {matchedPresetHost ? (
-                <Typography variant="body2" color="text.secondary">
-                  当前链接 host：{matchedPresetHost}
-                </Typography>
-              ) : null}
-              {selectedPreset ? (
-                <Paper variant="outlined" sx={{ p: 1.5 }}>
-                  <Stack spacing={1}>
-                    <Typography variant="subtitle2">当前预设内容</Typography>
-                    <Typography variant="body2">{selectedPreset.host}</Typography>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                      {JSON.stringify(selectedPreset.headers)}
-                    </Typography>
-                  </Stack>
-                </Paper>
-              ) : (
-                <Alert severity="info">未选择 header 预设时，将不会传入下载 header。</Alert>
-              )}
-              <TextField
-                fullWidth
-                label="并发数"
-                type="number"
-                value={downloadForm.concurrent}
-                onChange={(event) =>
-                  setDownloadForm((current) => ({ ...current, concurrent: Number(event.target.value) }))
-                }
-                slotProps={{ htmlInput: { min: 1 } }}
-              />
-              <Button
-                variant="outlined"
-                onClick={() => {
-                  setCreateDialogOpen(false)
-                  setActiveTab('headers')
-                }}
-              >
-                前往管理 Header 预设
-              </Button>
-            </Stack>
-          ) : null}
-          {activeTab === 'combine' ? (
-            <Stack spacing={2} sx={{ pt: 1 }}>
-              <TextField
-                fullWidth
-                label="文件正则模式"
-                value={combineForm.reg_name}
-                onChange={(event) => setCombineForm((current) => ({ ...current, reg_name: event.target.value }))}
-              />
-              <TextField
-                fullWidth
-                label="开始索引"
-                type="number"
-                value={combineForm.reg_name_start}
-                onChange={(event) =>
-                  setCombineForm((current) => ({ ...current, reg_name_start: Number(event.target.value) }))
-                }
-              />
-              <TextField
-                fullWidth
-                label="结束索引"
-                type="number"
-                value={combineForm.reg_name_end}
-                onChange={(event) =>
-                  setCombineForm((current) => ({ ...current, reg_name_end: Number(event.target.value) }))
-                }
-              />
-            </Stack>
-          ) : null}
-          {activeTab === 'cut' ? (
-            <Stack spacing={2} sx={{ pt: 1 }}>
-              <TextField
-                fullWidth
-                label="输入文件"
-                value={cutForm.input}
-                onChange={(event) => setCutForm((current) => ({ ...current, input: event.target.value }))}
-              />
-              <TextField
-                fullWidth
-                label="开始秒数"
-                type="number"
-                value={cutForm.start}
-                onChange={(event) => setCutForm((current) => ({ ...current, start: Number(event.target.value) }))}
-              />
-              <TextField
-                fullWidth
-                label="持续时长"
-                type="number"
-                value={cutForm.duration}
-                onChange={(event) =>
-                  setCutForm((current) => ({ ...current, duration: Number(event.target.value) }))
-                }
-              />
-            </Stack>
-          ) : null}
-          <Divider sx={{ my: 2 }} />
-          <Typography variant="subtitle2" gutterBottom>
-            命令预览
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 1.5, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-            {commandPreview}
-          </Paper>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>取消</Button>
-          <Button onClick={() => void handleCreateTask()} disabled={loading} variant="contained">
-            {loading ? '提交中...' : '执行'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CreateTaskDialog
+        open={createDialogOpen && isTaskPage(currentPage)}
+        page={currentTaskPage}
+        createTitle={createTitle}
+        commandPreview={commandPreview}
+        loading={loading}
+        downloadForm={downloadForm}
+        combineForm={combineForm}
+        cutForm={cutForm}
+        headerPresets={headerPresets}
+        selectedPresetHost={selectedPresetHost}
+        selectedPreset={selectedPreset}
+        matchedPresetHost={matchedPresetHost}
+        onPresetChange={setSelectedPresetHost}
+        onDownloadFormChange={setDownloadForm}
+        onCombineFormChange={setCombineForm}
+        onCutFormChange={setCutForm}
+        onClose={() => setCreateDialogOpen(false)}
+        onManageHeaders={() => {
+          setCreateDialogOpen(false)
+          navigate(getPathForPage('headers'))
+        }}
+        onSubmit={() => void handleCreateTask()}
+      />
 
-      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>任务详情</DialogTitle>
-        <DialogContent>
-          {detailLoading ? (
-            <Typography>加载中...</Typography>
-          ) : detail ? (
-            <Stack spacing={1}>
-              <Typography variant="body2">任务：{detail.task.title}</Typography>
-              <Typography variant="body2">命令：{detail.task.command_preview}</Typography>
-              <Typography variant="body2">输出目录：{detail.output_dir ?? '--'}</Typography>
-              {detail.task.payload.kind === 'download' &&
-              detail.task.status === 'success' &&
-              detail.task.result_path ? (
-                <Box>
-                  <Button size="small" variant="outlined" onClick={() => handleOpenVideo(detail.task)}>
-                    打开播放
-                  </Button>
-                </Box>
-              ) : null}
-              <Typography variant="subtitle2">目录内容：</Typography>
-              <List dense>
-                {detail.output_files.length === 0 ? (
-                  <ListItem>暂无文件</ListItem>
-                ) : (
-                  detail.output_files.map((file) => <ListItem key={file}>{file}</ListItem>)
-                )}
-              </List>
-            </Stack>
-          ) : (
-            <Typography>暂无详情</Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDetailOpen(false)}>关闭</Button>
-        </DialogActions>
-      </Dialog>
+      <TaskDetailDialog
+        open={detailOpen}
+        loading={detailLoading}
+        detail={detail}
+        onClose={() => setDetailOpen(false)}
+        onOpenVideo={handleOpenVideo}
+      />
 
-      <Dialog open={baseInfoEditOpen} onClose={() => setBaseInfoEditOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>编辑失败任务 base_info.json</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              fullWidth
-              label="m3u8 链接 URL"
-              value={baseInfoForm.url}
-              onChange={(event) =>
-                setBaseInfoForm((current) => ({
-                  ...current,
-                  url: event.target.value,
-                }))
-              }
-            />
-            <TextField
-              fullWidth
-              label="m3u8 文件名（可选）"
-              value={baseInfoForm.m3u8_name}
-              onChange={(event) =>
-                setBaseInfoForm((current) => ({
-                  ...current,
-                  m3u8_name: event.target.value,
-                }))
-              }
-            />
-            <TextField
-              fullWidth
-              label="输出文件名"
-              value={baseInfoForm.target_file_name}
-              onChange={(event) =>
-                setBaseInfoForm((current) => ({
-                  ...current,
-                  target_file_name: event.target.value,
-                }))
-              }
-            />
-            <TextField
-              fullWidth
-              label="并发数"
-              type="number"
-              value={baseInfoForm.concurrent}
-              onChange={(event) =>
-                setBaseInfoForm((current) => ({
-                  ...current,
-                  concurrent: Number(event.target.value),
-                }))
-              }
-            />
-            <TextField
-              fullWidth
-              label="Header JSON"
-              value={baseInfoHeaderText}
-              onChange={(event) => setBaseInfoHeaderText(event.target.value)}
-              multiline
-              minRows={6}
-            />
-            <Typography variant="subtitle2" gutterBottom>
-              命令预览
-            </Typography>
-            <Paper variant="outlined" sx={{ p: 1.5, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-              {baseInfoCommandPreview}
-            </Paper>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBaseInfoEditOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={() => void handleSaveBaseInfo()}>
-            保存
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <BaseInfoEditDialog
+        open={baseInfoEditOpen}
+        baseInfoForm={baseInfoForm}
+        baseInfoHeaderText={baseInfoHeaderText}
+        commandPreview={baseInfoCommandPreview}
+        onClose={() => setBaseInfoEditOpen(false)}
+        onBaseInfoFormChange={setBaseInfoForm}
+        onBaseInfoHeaderTextChange={setBaseInfoHeaderText}
+        onSave={() => void handleSaveBaseInfo()}
+      />
     </Box>
   )
 }
