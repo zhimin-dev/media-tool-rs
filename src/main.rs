@@ -289,6 +289,8 @@ impl DownloadArgs {
                         self.folder.clone(),
                         self.concurrent,
                         headers,
+                        self.download_dir.clone(),
+                        self.ffmpeg_download,
                     )
                     .await
                     .expect("下载失败");

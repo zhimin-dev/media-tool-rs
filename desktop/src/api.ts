@@ -1,4 +1,4 @@
-import type { CreateTaskRequest, HeaderPreset, TaskDetail, TaskRecord } from './types'
+import type { BaseInfo, CreateTaskRequest, HeaderPreset, TaskDetail, TaskRecord } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -45,6 +45,17 @@ export async function deleteTask(id: number): Promise<void> {
 export async function fetchTaskDetail(id: number): Promise<TaskDetail> {
   const response = await fetch(`${API_BASE}/tasks/${id}/detail`)
   return parseResponse<TaskDetail>(response)
+}
+
+export async function updateTaskBaseInfo(id: number, payload: BaseInfo): Promise<TaskRecord> {
+  const response = await fetch(`${API_BASE}/tasks/${id}/base-info`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  return parseResponse<TaskRecord>(response)
 }
 
 export async function fetchHeaderPresets(): Promise<HeaderPreset[]> {

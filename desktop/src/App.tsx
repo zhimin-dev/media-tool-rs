@@ -37,12 +37,14 @@ import {
   fetchTasks,
   retryTask,
   saveHeaderPreset,
+  updateTaskBaseInfo,
 } from './api'
 import M3u8Player from './components/M3u8Player'
 import type {
   CombinePayload,
   CutPayload,
   DownloadPayload,
+  BaseInfo,
   HeaderPreset,
   TaskDetail,
   TaskPayload,
@@ -108,6 +110,17 @@ const defaultCutForm: CutPayload = {
   target_file_name: '',
 }
 
+const defaultBaseInfoForm: BaseInfo = {
+  url: '',
+  m3u8_name: '',
+  header: {},
+  target_file_name: '',
+  folder: '',
+  concurrent: 10,
+  download_dir: 'download',
+  ffmpeg_download: false,
+}
+
 type HeaderRow = {
   key: string
   value: string
@@ -128,6 +141,11 @@ function App() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [baseInfoEditOpen, setBaseInfoEditOpen] = useState(false)
+  const [baseInfoEditLoading, setBaseInfoEditLoading] = useState(false)
+  const [baseInfoEditingTaskId, setBaseInfoEditingTaskId] = useState<number | null>(null)
+  const [baseInfoForm, setBaseInfoForm] = useState<BaseInfo>(defaultBaseInfoForm)
+  const [baseInfoHeaderText, setBaseInfoHeaderText] = useState('{}')
   const [headerPresets, setHeaderPresets] = useState<HeaderPreset[]>([])
   const [selectedPresetHost, setSelectedPresetHost] = useState('')
   const [presetFormHost, setPresetFormHost] = useState('')
@@ -350,6 +368,79 @@ function App() {
     }
   }
 
+  const handleOpenVideo = (task: TaskRecord) => {
+    if (!task.result_path) {
+      setError('未找到视频输出文件')
+      return
+    }
+
+    setError('')
+    const normalized = task.result_path.replaceAll('\\', '/')
+    const url = `file://${encodeURI(normalized)}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleOpenBaseInfoEditor = async (taskId: number) => {
+    setBaseInfoEditLoading(true)
+    setError('')
+    try {
+      const taskDetail = await fetchTaskDetail(taskId)
+      const payload = taskDetail.task.payload
+      if (payload.kind !== 'download') {
+        throw new Error('仅下载任务支持编辑 base_info.json')
+      }
+      const source = taskDetail.base_info ?? {
+        ...defaultBaseInfoForm,
+        url: payload.url,
+        target_file_name: payload.target_file_name,
+        folder: payload.folder,
+        concurrent: payload.concurrent,
+        download_dir: payload.download_dir,
+        ffmpeg_download: payload.ffmpeg_download,
+        header: payload.headers,
+      }
+      setBaseInfoEditingTaskId(taskId)
+      setBaseInfoForm(source)
+      setBaseInfoHeaderText(JSON.stringify(source.header ?? {}, null, 2))
+      setBaseInfoEditOpen(true)
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '加载 base_info 失败'
+      setError(message)
+    } finally {
+      setBaseInfoEditLoading(false)
+    }
+  }
+
+  const handleSaveBaseInfo = async () => {
+    if (!baseInfoEditingTaskId) {
+      return
+    }
+
+    let parsedHeaders: Record<string, string>
+    try {
+      parsedHeaders = JSON.parse(baseInfoHeaderText || '{}') as Record<string, string>
+    } catch {
+      setError('Header JSON 格式错误')
+      return
+    }
+
+    try {
+      const updatedTask = await updateTaskBaseInfo(baseInfoEditingTaskId, {
+        ...baseInfoForm,
+        header: parsedHeaders,
+      })
+      setTasks((current) =>
+        current.map((task) => (task.id === updatedTask.id ? updatedTask : task)),
+      )
+      setSuccessMessage('base_info.json 已更新')
+      setError('')
+      setBaseInfoEditOpen(false)
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '更新 base_info 失败'
+      setError(message)
+    }
+  }
+
   const createTitle = activeTab === 'watch' ? '新建任务' : `新建${tabLabelMap[activeTab]}任务`
   const commandPreview = buildCommandPreview(currentPayload)
 
@@ -536,6 +627,27 @@ function App() {
                               <Button variant="outlined" size="small" onClick={() => handleView(task.id)}>
                                 查看
                               </Button>
+                              {task.payload.kind === 'download' &&
+                              task.status === 'success' &&
+                              task.result_path ? (
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  onClick={() => handleOpenVideo(task)}
+                                >
+                                  打开播放
+                                </Button>
+                              ) : null}
+                              {task.payload.kind === 'download' && task.status === 'failed' ? (
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  disabled={baseInfoEditLoading}
+                                  onClick={() => void handleOpenBaseInfoEditor(task.id)}
+                                >
+                                  编辑失败任务
+                                </Button>
+                              ) : null}
                               <Button variant="outlined" size="small" onClick={() => void handleRetry(task.id)}>
                                 重试
                               </Button>
@@ -708,6 +820,15 @@ function App() {
               <Typography variant="body2">任务：{detail.task.title}</Typography>
               <Typography variant="body2">命令：{detail.task.command_preview}</Typography>
               <Typography variant="body2">输出目录：{detail.output_dir ?? '--'}</Typography>
+              {detail.task.payload.kind === 'download' &&
+              detail.task.status === 'success' &&
+              detail.task.result_path ? (
+                <Box>
+                  <Button size="small" variant="outlined" onClick={() => handleOpenVideo(detail.task)}>
+                    打开播放
+                  </Button>
+                </Box>
+              ) : null}
               <Typography variant="subtitle2">目录内容：</Typography>
               <List dense>
                 {detail.output_files.length === 0 ? (
@@ -725,6 +846,73 @@ function App() {
           <Button onClick={() => setDetailOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog open={baseInfoEditOpen} onClose={() => setBaseInfoEditOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>编辑失败任务 base_info.json</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              fullWidth
+              label="m3u8 链接 URL"
+              value={baseInfoForm.url}
+              onChange={(event) =>
+                setBaseInfoForm((current) => ({
+                  ...current,
+                  url: event.target.value,
+                }))
+              }
+            />
+            <TextField
+              fullWidth
+              label="m3u8 文件名（可选）"
+              value={baseInfoForm.m3u8_name}
+              onChange={(event) =>
+                setBaseInfoForm((current) => ({
+                  ...current,
+                  m3u8_name: event.target.value,
+                }))
+              }
+            />
+            <TextField
+              fullWidth
+              label="输出文件名"
+              value={baseInfoForm.target_file_name}
+              onChange={(event) =>
+                setBaseInfoForm((current) => ({
+                  ...current,
+                  target_file_name: event.target.value,
+                }))
+              }
+            />
+            <TextField
+              fullWidth
+              label="并发数"
+              type="number"
+              value={baseInfoForm.concurrent}
+              onChange={(event) =>
+                setBaseInfoForm((current) => ({
+                  ...current,
+                  concurrent: Number(event.target.value),
+                }))
+              }
+            />
+            <TextField
+              fullWidth
+              label="Header JSON"
+              value={baseInfoHeaderText}
+              onChange={(event) => setBaseInfoHeaderText(event.target.value)}
+              multiline
+              minRows={6}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBaseInfoEditOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={() => void handleSaveBaseInfo()}>
+            保存
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
@@ -740,7 +928,7 @@ function buildCommandPreview(payload: TaskPayload) {
         parts.push('--ffmpeg_download')
       }
       if (payload.target_file_name) {
-        parts.push(`--target_file_name=${payload.target_file_name}`)
+        parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
       }
       if (payload.folder) {
         parts.push(`--folder=${payload.folder}`)
@@ -764,7 +952,7 @@ function buildCommandPreview(payload: TaskPayload) {
         `--reg-file-end=${payload.reg_name_end}`,
       ]
       if (payload.target_file_name) {
-        parts.push(`--target_file_name=${payload.target_file_name}`)
+        parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
       }
       if (payload.same_param_index >= 0) {
         parts.push(`--same_param_index=${payload.same_param_index}`)
@@ -774,7 +962,7 @@ function buildCommandPreview(payload: TaskPayload) {
     case 'cut': {
       const parts = ['media-tool-rs cut', `-i=${payload.input}`, `-s=${payload.start}`, `-d=${payload.duration}`]
       if (payload.target_file_name) {
-        parts.push(`--target_file_name=${payload.target_file_name}`)
+        parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
       }
       return parts.join(' ')
     }
@@ -832,6 +1020,10 @@ function getHostFromUrl(url: string) {
 
 function formatHeaderCommandValue(headers: Record<string, string>) {
   return `'${JSON.stringify(headers).replaceAll("'", `'"'"'`)}'`
+}
+
+function shellDoubleQuote(value: string) {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 
 export default App
