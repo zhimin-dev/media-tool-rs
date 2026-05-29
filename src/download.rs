@@ -231,10 +231,14 @@ pub mod download {
         if !hls_m3u.x_map_uri.is_empty() {
             start = -1;
         }
+        let end = match total.checked_sub(1) {
+            Some(last) => last as i32,
+            None => -1,
+        };
         let res = handle_combine_ts(
             String::from(format!("(.*).{}", hls_m3u.extension)),
             start,
-            (total - 1) as i32,
+            end,
             _file_name.clone(),
             hls_m3u.method,
             folder.clone(),
