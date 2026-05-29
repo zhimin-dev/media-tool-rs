@@ -1,5 +1,5 @@
 use crate::cmd::cmd::{check_base_info_exists, clear_temp_files, cut, download as ffmpeg_download};
-use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_files};
+use crate::combine::parse::{combine_video, get_reg_files, to_files};
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
@@ -741,7 +741,7 @@ async fn run_combine_task(
             .map_err(|_| "解析文件失败".to_string())?;
         let file_name = to_files().map_err(|_| "生成临时文件失败".to_string())?;
         let target = if target_file_name.trim().is_empty() {
-            format!("./{}", get_reg_file_name(reg_name))
+            format!("./{}.mp4", now())
         } else {
             format!("./{}", target_file_name)
         };
