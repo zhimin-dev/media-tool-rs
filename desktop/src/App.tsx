@@ -110,10 +110,6 @@ function App() {
   const [editingPresetHost, setEditingPresetHost] = useState('')
 
   useEffect(() => {
-    setCreateDialogOpen(false)
-  }, [currentPage])
-
-  useEffect(() => {
     let alive = true
 
     const loadTasks = async () => {
