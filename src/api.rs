@@ -6,6 +6,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -72,6 +73,13 @@ pub struct CreateTaskRequest {
     pub payload: TaskPayload,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TaskDetailResponse {
+    pub task: TaskRecord,
+    pub output_dir: Option<String>,
+    pub output_files: Vec<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     tasks: Arc<RwLock<HashMap<u64, TaskRecord>>>,
@@ -106,6 +114,9 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks", web::get().to(list_tasks))
             .route("/api/tasks/{id}", web::get().to(get_task))
             .route("/api/tasks", web::post().to(create_task))
+            .route("/api/tasks/{id}/detail", web::get().to(get_task_detail))
+            .route("/api/tasks/{id}/retry", web::post().to(retry_task))
+            .route("/api/tasks/{id}", web::delete().to(delete_task))
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -147,24 +158,9 @@ async fn create_task(
     state: web::Data<AppState>,
     request: web::Json<CreateTaskRequest>,
 ) -> impl Responder {
-    let payload = request.payload.clone();
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
-    let task = TaskRecord {
-        id,
-        title: request
-            .title
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| default_title(&payload)),
-        status: TaskStatus::Queued,
-        created_at: now(),
-        started_at: None,
-        finished_at: None,
-        command_preview: build_command_preview(&payload),
-        message: Some("任务已创建，等待执行".to_string()),
-        result_path: None,
-        payload: payload.clone(),
-    };
+    let task = build_task_record(id, request.title.clone(), request.payload.clone());
+    let payload = task.payload.clone();
 
     state.tasks.write().await.insert(id, task.clone());
 
@@ -174,6 +170,64 @@ async fn create_task(
     });
 
     HttpResponse::Ok().json(task)
+}
+
+async fn get_task_detail(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
+    let id = path.into_inner();
+    let task = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&id).cloned()
+    };
+
+    let Some(task) = task else {
+        return HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        }));
+    };
+
+    let (output_dir, output_files) = resolve_task_output_detail(&task);
+    HttpResponse::Ok().json(TaskDetailResponse {
+        task,
+        output_dir,
+        output_files,
+    })
+}
+
+async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
+    let source_id = path.into_inner();
+    let source_task = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&source_id).cloned()
+    };
+
+    let Some(source_task) = source_task else {
+        return HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", source_id),
+        }));
+    };
+
+    let id = state.next_id.fetch_add(1, Ordering::SeqCst);
+    let task = build_task_record(id, Some(format!("{}（重试）", source_task.title)), source_task.payload);
+    let payload = task.payload.clone();
+    state.tasks.write().await.insert(id, task.clone());
+
+    let background_state = state.get_ref().clone();
+    tokio::spawn(async move {
+        execute_task(background_state, id, payload).await;
+    });
+
+    HttpResponse::Ok().json(task)
+}
+
+async fn delete_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
+    let id = path.into_inner();
+    let removed = state.tasks.write().await.remove(&id);
+    match removed {
+        Some(task) => HttpResponse::Ok().json(task),
+        None => HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        })),
+    }
 }
 
 async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
@@ -266,6 +320,23 @@ where
     let mut tasks = state.tasks.write().await;
     if let Some(task) = tasks.get_mut(&id) {
         updater(task);
+    }
+}
+
+fn build_task_record(id: u64, title: Option<String>, payload: TaskPayload) -> TaskRecord {
+    TaskRecord {
+        id,
+        title: title
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_title(&payload)),
+        status: TaskStatus::Queued,
+        created_at: now(),
+        started_at: None,
+        finished_at: None,
+        command_preview: build_command_preview(&payload),
+        message: Some("任务已创建，等待执行".to_string()),
+        result_path: None,
+        payload,
     }
 }
 
@@ -529,4 +600,49 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             parts.join(" ")
         }
     }
+}
+
+fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>) {
+    let current_dir = env::current_dir().ok();
+    let output_dir = match &task.payload {
+        TaskPayload::Download {
+            folder,
+            download_dir,
+            url,
+            ..
+        } => current_dir.clone().map(|base| {
+            let folder_name = resolve_download_folder_name(url, folder);
+            base.join(download_dir).join(folder_name)
+        }),
+        TaskPayload::Combine { .. } => task
+            .result_path
+            .as_ref()
+            .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
+            .or(current_dir.clone()),
+        TaskPayload::Cut { .. } => current_dir.map(|base| base.join("cut")),
+    };
+
+    let files = output_dir
+        .as_ref()
+        .map(read_directory_entries)
+        .unwrap_or_default();
+
+    (output_dir.map(|path| path.display().to_string()), files)
+}
+
+fn read_directory_entries(path: &PathBuf) -> Vec<String> {
+    if !path.exists() {
+        return Vec::new();
+    }
+
+    let mut names = fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
+        .collect::<Vec<_>>();
+    names.sort();
+    names
 }

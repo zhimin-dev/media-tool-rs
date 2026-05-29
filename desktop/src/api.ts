@@ -1,4 +1,4 @@
-import type { CreateTaskRequest, TaskRecord } from './types'
+import type { CreateTaskRequest, TaskDetail, TaskRecord } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -26,4 +26,23 @@ export async function createTask(request: CreateTaskRequest): Promise<TaskRecord
   })
 
   return parseResponse<TaskRecord>(response)
+}
+
+export async function retryTask(id: number): Promise<TaskRecord> {
+  const response = await fetch(`${API_BASE}/tasks/${id}/retry`, {
+    method: 'POST',
+  })
+  return parseResponse<TaskRecord>(response)
+}
+
+export async function deleteTask(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/tasks/${id}`, {
+    method: 'DELETE',
+  })
+  await parseResponse<TaskRecord>(response)
+}
+
+export async function fetchTaskDetail(id: number): Promise<TaskDetail> {
+  const response = await fetch(`${API_BASE}/tasks/${id}/detail`)
+  return parseResponse<TaskDetail>(response)
 }
