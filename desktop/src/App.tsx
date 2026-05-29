@@ -559,7 +559,11 @@ function App() {
                     </Button>
                   </Box>
                 </Stack>
-                <M3u8Player url={playerUrl} headers={playerHeaders} />
+                {
+                  playerUrl ? (
+                    <M3u8Player url={playerUrl} headers={playerHeaders} />
+                  ):''
+                }
               </Stack>
             </Paper>
           ) : activeTab === 'headers' ? (
