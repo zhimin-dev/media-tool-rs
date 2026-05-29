@@ -6,6 +6,7 @@ export type DownloadPayload = {
   folder: string
   concurrent: number
   download_dir: string
+  headers: Record<string, string>
 }
 
 export type CombinePayload = {
@@ -56,4 +57,9 @@ export type TaskDetail = {
   task: TaskRecord
   output_dir: string | null
   output_files: string[]
+}
+
+export type HeaderPreset = {
+  host: string
+  headers: Record<string, string>
 }
