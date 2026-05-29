@@ -23,6 +23,12 @@ media-tool-rs combine -r IMG_\(\.\*\).MOV --reg-file-start=1767 --reg-file-end=1
 media-tool-rs download --url=https://zmis.me/xxx.m3u8 --folder=1222
 ```
 
+如果下载需要请求头，可以通过 JSON 字符串传入：
+
+```bash
+media-tool-rs download --url=https://zmis.me/xxx.m3u8 --headers='{"referer":"https://zmis.me","origin":"https://zmis.me"}'
+```
+
 ### 截取视频
 
 -i 需要截取的视频

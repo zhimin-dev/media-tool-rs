@@ -211,6 +211,10 @@ pub struct DownloadArgs {
     /// 下载并发数
     #[arg(long = "download_dir", default_value_t = String::from("download"))]
     download_dir: String,
+
+    /// 下载请求头，JSON 字符串，如 {"referer":"https://a.com","origin":"https://a.com"}
+    #[arg(long = "headers", default_value_t = String::from(""))]
+    headers: String,
 }
 
 #[derive(clapArgs)]
@@ -231,6 +235,18 @@ fn path_to_md5(url_str: &str) -> Option<String> {
 }
 
 impl DownloadArgs {
+    fn get_headers(&self) -> Option<HashMap<String, String>> {
+        if self.headers.trim().is_empty() {
+            return Some(HashMap::new());
+        }
+        match serde_json::from_str::<HashMap<String, String>>(self.headers.as_str()) {
+            Ok(headers) => Some(headers),
+            Err(error) => {
+                println!("headers 参数必须是有效的 JSON 字符串: {}", error);
+                None
+            }
+        }
+    }
     fn get_folder(&self) -> String {
         let mut folder_name = self.folder.clone();
         if folder_name.is_empty() {
@@ -244,6 +260,10 @@ impl DownloadArgs {
         format!("./{}/{}", self.download_dir, folder_name)
     }
     pub async fn download(&mut self, current_dir: PathBuf) {
+        let headers = match self.get_headers() {
+            Some(data) => data,
+            None => return,
+        };
         let folder_name = self.get_folder();
         println!("download folder name == {}", folder_name.clone());
         // url 或者文件夹存在base_info.json 存在即可，否则报错
@@ -268,7 +288,7 @@ impl DownloadArgs {
                         file_name,
                         self.folder.clone(),
                         self.concurrent,
-                        HashMap::new(),
+                        headers,
                     )
                     .await
                     .expect("下载失败");
