@@ -11,3 +11,4 @@ header_presets.json
 .DS_Store
 /static/download/
 /static/cut/
+package-lock.json

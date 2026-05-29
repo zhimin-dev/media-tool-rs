@@ -1,21 +1,21 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { internalIpV4 } from "internal-ip";
+import { internalIpV4 } from 'internal-ip'
 
-const mobile = !!/android|ios/.exec(process.env.TAURI_ENV_PLATFORM);
+const mobile = /android|ios/.test(process.env.TAURI_ENV_PLATFORM ?? '')
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base:'/',
+  base: '/',
   clearScreen: false,
   server: {
     port: 5173,
     strictPort: true,
-    host: "0.0.0.0",
+    host: '0.0.0.0',
     hmr: mobile
       ? {
-          protocol: "ws",
+          protocol: 'ws',
           host: await internalIpV4(),
           port: 1421,
         }

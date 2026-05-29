@@ -224,7 +224,6 @@ function sanitizeVideoUrl(value: string) {
     return ''
   }
 
-  // Allow relative URLs (e.g. /api/serve-video?path=...)
   if (value.startsWith('/')) {
     return value
   }

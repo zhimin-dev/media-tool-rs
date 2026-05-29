@@ -520,7 +520,6 @@ function App() {
 
       <Container maxWidth="lg" sx={{ py: 3 }}>
         <Stack spacing={2}>
-          <Typography variant="h5">{tabLabelMap[activeTab]}页面</Typography>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {successMessage ? <Alert severity="success">{successMessage}</Alert> : null}
 
@@ -720,9 +719,6 @@ function App() {
                                 {task.payload.target_file_name}
                               </Typography>
                             ) : null}
-                            <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                              {getTaskFileName(task)}
-                            </Typography>
                             <Typography variant="body2" color="text.secondary">
                               {task.message ?? '等待结果'}
                             </Typography>
@@ -1143,18 +1139,6 @@ function formatHeaderCommandValue(headers: Record<string, string>) {
 
 function shellDoubleQuote(value: string) {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
-}
-
-function getTaskFileName(task: TaskRecord): string {
-  const { payload } = task
-  switch (payload.kind) {
-    case 'download':
-      return payload.target_file_name || payload.folder || task.title
-    case 'combine':
-      return payload.target_file_name || task.title
-    case 'cut':
-      return payload.target_file_name || payload.input || task.title
-  }
 }
 
 export default App
