@@ -1,4 +1,9 @@
-import type { CreateTaskRequest, TaskRecord } from './types'
+import type {
+  CreateHeaderPresetRequest,
+  CreateTaskRequest,
+  HeaderPreset,
+  TaskRecord,
+} from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -26,4 +31,22 @@ export async function createTask(request: CreateTaskRequest): Promise<TaskRecord
   })
 
   return parseResponse<TaskRecord>(response)
+}
+
+export async function fetchHeaderPresets(): Promise<HeaderPreset[]> {
+  const response = await fetch(`${API_BASE}/header-presets`)
+  return parseResponse<HeaderPreset[]>(response)
+}
+
+export async function createHeaderPreset(
+  request: CreateHeaderPresetRequest,
+): Promise<HeaderPreset> {
+  const response = await fetch(`${API_BASE}/header-presets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
+  return parseResponse<HeaderPreset>(response)
 }
