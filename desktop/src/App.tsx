@@ -406,7 +406,11 @@ function App() {
             <Stack spacing={2}>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Stack spacing={2}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between">
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1}
+                    sx={{ justifyContent: 'space-between' }}
+                  >
                     <Typography variant="h6">Header 预设列表</Typography>
                     <Button variant="outlined" onClick={resetPresetForm}>
                       新建预设
@@ -827,7 +831,7 @@ function getHostFromUrl(url: string) {
 }
 
 function formatHeaderCommandValue(headers: Record<string, string>) {
-  return `'${JSON.stringify(headers).replaceAll("'", `'\"'\"'`)}'`
+  return `'${JSON.stringify(headers).replaceAll("'", `'"'"'`)}'`
 }
 
 export default App
