@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
 use url::Url;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Queued,
@@ -1095,63 +1095,63 @@ fn resolve_task_directory(task: &TaskRecord) -> Option<PathBuf> {
         }),
         _ => None,
     }
+}
 
-    fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> TaskPayload {
-        match payload {
-            TaskPayload::Download {
-                folder,
-                download_dir,
-                url,
-                ffmpeg_download,
-                target_file_name,
-                concurrent,
-                headers,
-            } => {
-                let base_info = task_dir.and_then(|path| read_task_base_info(&path));
-                if let Some(info) = base_info {
-                    TaskPayload::Download {
-                        url: if info.url.trim().is_empty() {
-                            url
-                        } else {
-                            info.url
-                        },
-                        ffmpeg_download: info.ffmpeg_download || ffmpeg_download,
-                        target_file_name: if info.target_file_name.trim().is_empty() {
-                            target_file_name
-                        } else {
-                            info.target_file_name
-                        },
-                        folder,
-                        concurrent: if info.concurrent > 0 {
-                            info.concurrent
-                        } else {
-                            concurrent
-                        },
-                        download_dir: if info.download_dir.trim().is_empty() {
-                            download_dir
-                        } else {
-                            info.download_dir
-                        },
-                        headers: if info.header.is_empty() {
-                            headers
-                        } else {
-                            normalize_headers(info.header)
-                        },
-                    }
-                } else {
-                    TaskPayload::Download {
-                        url,
-                        ffmpeg_download,
-                        target_file_name,
-                        folder,
-                        concurrent,
-                        download_dir,
-                        headers,
-                    }
+fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> TaskPayload {
+    match payload {
+        TaskPayload::Download {
+            folder,
+            download_dir,
+            url,
+            ffmpeg_download,
+            target_file_name,
+            concurrent,
+            headers,
+        } => {
+            let base_info = task_dir.and_then(|path| read_task_base_info(&path));
+            if let Some(info) = base_info {
+                TaskPayload::Download {
+                    url: if info.url.trim().is_empty() {
+                        url
+                    } else {
+                        info.url
+                    },
+                    ffmpeg_download: info.ffmpeg_download || ffmpeg_download,
+                    target_file_name: if info.target_file_name.trim().is_empty() {
+                        target_file_name
+                    } else {
+                        info.target_file_name
+                    },
+                    folder,
+                    concurrent: if info.concurrent > 0 {
+                        info.concurrent
+                    } else {
+                        concurrent
+                    },
+                    download_dir: if info.download_dir.trim().is_empty() {
+                        download_dir
+                    } else {
+                        info.download_dir
+                    },
+                    headers: if info.header.is_empty() {
+                        headers
+                    } else {
+                        normalize_headers(info.header)
+                    },
+                }
+            } else {
+                TaskPayload::Download {
+                    url,
+                    ffmpeg_download,
+                    target_file_name,
+                    folder,
+                    concurrent,
+                    download_dir,
+                    headers,
                 }
             }
-            other => other,
         }
+        other => other,
     }
 }
 

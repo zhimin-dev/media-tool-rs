@@ -416,7 +416,7 @@ function App() {
       return
     }
 
-    let parsedHeaders: Record<string, string> = {}
+    let parsedHeaders: Record<string, string>
     try {
       parsedHeaders = JSON.parse(baseInfoHeaderText || '{}') as Record<string, string>
     } catch {
