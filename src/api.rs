@@ -227,7 +227,11 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
     };
 
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
-    let task = build_task_record(id, Some(format!("{}（重试）", source_task.title)), source_task.payload);
+    let task = build_task_record(
+        id,
+        Some(format!("{}（重试）", source_task.title)),
+        source_task.payload,
+    );
     let payload = task.payload.clone();
     state.tasks.write().await.insert(id, task.clone());
 
@@ -735,7 +739,10 @@ fn read_directory_entries(path: &PathBuf) -> Vec<String> {
         .flatten()
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
+        .filter_map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
         .collect::<Vec<_>>();
     names.sort();
     names
@@ -863,9 +870,10 @@ fn resolve_task_directory(task: &TaskRecord) -> Option<PathBuf> {
             download_dir,
             url,
             ..
-        } => env::current_dir()
-            .ok()
-            .map(|base| base.join(download_dir).join(resolve_download_folder_name(url, folder))),
+        } => env::current_dir().ok().map(|base| {
+            base.join(download_dir)
+                .join(resolve_download_folder_name(url, folder))
+        }),
         _ => None,
     }
 }
@@ -885,7 +893,10 @@ fn load_header_presets(path: &PathBuf) -> Vec<HeaderPreset> {
     merge_header_presets(default_header_presets(), presets)
 }
 
-fn merge_header_presets(defaults: Vec<HeaderPreset>, stored: Vec<HeaderPreset>) -> Vec<HeaderPreset> {
+fn merge_header_presets(
+    defaults: Vec<HeaderPreset>,
+    stored: Vec<HeaderPreset>,
+) -> Vec<HeaderPreset> {
     let mut merged = defaults;
     for preset in stored {
         let normalized = HeaderPreset {
