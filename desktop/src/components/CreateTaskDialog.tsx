@@ -65,6 +65,7 @@ function CreateTaskDialog({
               fullWidth
               label="输出文件名"
               value={downloadForm.target_file_name}
+              helperText="可选，不填会使用随机文件名；不带后缀时会自动补 .mp4"
               onChange={(event) =>
                 onDownloadFormChange((current) => ({ ...current, target_file_name: event.target.value }))
               }
@@ -130,7 +131,17 @@ function CreateTaskDialog({
               fullWidth
               label="文件正则模式"
               value={combineForm.reg_name}
+              helperText="示例：~/file/path/(.*).mp4"
               onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value }))}
+            />
+            <TextField
+              fullWidth
+              label="输出文件名"
+              value={combineForm.target_file_name}
+              helperText="可选，如果不填则随机字符串"
+              onChange={(event) =>
+                onCombineFormChange((current) => ({ ...current, target_file_name: event.target.value }))
+              }
             />
             <TextField
               fullWidth
