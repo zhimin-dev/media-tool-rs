@@ -81,6 +81,24 @@ pub struct TaskDetailResponse {
     pub task: TaskRecord,
     pub output_dir: Option<String>,
     pub output_files: Vec<String>,
+    pub base_info: Option<BaseInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTaskBaseInfoRequest {
+    pub url: String,
+    #[serde(default)]
+    pub m3u8_name: String,
+    #[serde(default)]
+    pub header: HashMap<String, String>,
+    #[serde(default)]
+    pub target_file_name: String,
+    #[serde(default)]
+    pub concurrent: i32,
+    #[serde(default)]
+    pub download_dir: String,
+    #[serde(default)]
+    pub ffmpeg_download: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +152,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks", web::post().to(create_task))
             .route("/api/tasks/{id}/detail", web::get().to(get_task_detail))
             .route("/api/tasks/{id}/retry", web::post().to(retry_task))
+            .route("/api/tasks/{id}/base-info", web::put().to(update_task_base_info))
             .route("/api/tasks/{id}", web::delete().to(delete_task))
             .route("/api/header-presets", web::get().to(list_header_presets))
             .route("/api/header-presets", web::post().to(save_header_preset))
@@ -207,10 +226,12 @@ async fn get_task_detail(path: web::Path<u64>, state: web::Data<AppState>) -> im
     };
 
     let (output_dir, output_files) = resolve_task_output_detail(&task);
+    let base_info = resolve_task_directory(&task).and_then(|path| read_task_base_info(&path));
     HttpResponse::Ok().json(TaskDetailResponse {
         task,
         output_dir,
         output_files,
+        base_info,
     })
 }
 
@@ -228,10 +249,12 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
     };
 
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
+    let retry_dir = resolve_task_directory(&source_task);
+    let payload = hydrate_retry_payload(source_task.payload, retry_dir);
     let task = build_task_record(
         id,
         Some(format!("{}（重试）", source_task.title)),
-        source_task.payload,
+        payload,
     );
     let payload = task.payload.clone();
     state.tasks.write().await.insert(id, task.clone());
@@ -242,6 +265,118 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
     });
 
     HttpResponse::Ok().json(task)
+}
+
+async fn update_task_base_info(
+    path: web::Path<u64>,
+    state: web::Data<AppState>,
+    request: web::Json<UpdateTaskBaseInfoRequest>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let task = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&id).cloned()
+    };
+
+    let Some(task) = task else {
+        return HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        }));
+    };
+
+    if task.status != TaskStatus::Failed {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "仅支持编辑失败任务",
+        }));
+    }
+
+    let (folder, request_download_dir, current_headers) = match task.payload {
+        TaskPayload::Download {
+            folder,
+            download_dir,
+            headers,
+            ..
+        } => (folder, download_dir, headers),
+        _ => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "仅下载任务支持编辑 base_info.json",
+            }))
+        }
+    };
+
+    let normalized_headers = if request.header.is_empty() {
+        normalize_headers(current_headers)
+    } else {
+        normalize_headers(request.header.clone())
+    };
+    let concurrent = if request.concurrent > 0 {
+        request.concurrent
+    } else {
+        10
+    };
+    let download_dir = if request.download_dir.trim().is_empty() {
+        request_download_dir
+    } else {
+        request.download_dir.trim().to_string()
+    };
+
+    let base_info = BaseInfo {
+        url: request.url.clone(),
+        m3u8_name: request.m3u8_name.clone(),
+        header: normalized_headers.clone(),
+        target_file_name: request.target_file_name.clone(),
+        folder: folder.clone(),
+        concurrent,
+        download_dir: download_dir.clone(),
+        ffmpeg_download: request.ffmpeg_download,
+    };
+
+    let current_dir = match env::current_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": format!("读取当前目录失败: {}", error),
+            }))
+        }
+    };
+    let folder_path = current_dir.join(&download_dir).join(&folder);
+    if let Err(error) = ensure_directory_exists(folder_path.clone()) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("确保任务目录失败: {}", error),
+        }));
+    }
+    if let Err(error) = write_base_info(&folder_path, &base_info) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("写入 base_info.json 失败: {}", error),
+        }));
+    }
+
+    update_task(&state, id, |record| {
+        record.payload = TaskPayload::Download {
+            url: base_info.url.clone(),
+            ffmpeg_download: base_info.ffmpeg_download,
+            target_file_name: base_info.target_file_name.clone(),
+            folder: base_info.folder.clone(),
+            concurrent: base_info.concurrent,
+            download_dir: base_info.download_dir.clone(),
+            headers: base_info.header.clone(),
+        };
+        record.command_preview = build_command_preview(&record.payload);
+        record.message = Some("base_info.json 已更新，可重试".to_string());
+    })
+    .await;
+
+    let updated = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&id).cloned()
+    };
+
+    match updated {
+        Some(task) => HttpResponse::Ok().json(task),
+        None => HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        })),
+    }
 }
 
 async fn delete_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
@@ -482,6 +617,21 @@ async fn run_download_task(
     }
 
     create_folder(relative_folder.clone()).map_err(|error| error.to_string())?;
+    let persisted_base_info = BaseInfo {
+        url: url.clone(),
+        m3u8_name: String::new(),
+        header: normalize_headers(headers.clone()),
+        target_file_name: output_name.clone(),
+        folder: folder_name.clone(),
+        concurrent,
+        download_dir: download_dir.clone(),
+        ffmpeg_download: ffmpeg_download_mode,
+    };
+    write_base_info(
+        &current_dir.join(relative_folder.trim_start_matches("./")),
+        &persisted_base_info,
+    )
+    .map_err(|error| error.to_string())?;
 
     let success = if ffmpeg_download_mode {
         let full_file = format!("{}/{}", relative_folder, output_name);
@@ -494,6 +644,8 @@ async fn run_download_task(
             folder_name.clone(),
             concurrent,
             normalize_headers(headers),
+            download_dir.clone(),
+            ffmpeg_download_mode,
         )
         .await
         .map_err(|_| "下载失败".to_string());
@@ -617,6 +769,11 @@ fn ensure_directory_exists(path: PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
+fn write_base_info(folder_path: &PathBuf, base_info: &BaseInfo) -> std::io::Result<()> {
+    let content = serde_json::to_string_pretty(base_info)?;
+    fs::write(folder_path.join("base_info.json"), content)
+}
+
 fn resolve_download_folder_name(url: &str, folder: &str) -> String {
     if !folder.trim().is_empty() {
         return folder.to_string();
@@ -656,7 +813,10 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                 parts.push("--ffmpeg_download".to_string());
             }
             if !target_file_name.trim().is_empty() {
-                parts.push(format!("--target_file_name={}", target_file_name));
+                parts.push(format!(
+                    "--target_file_name={}",
+                    shell_double_quote(target_file_name)
+                ));
             }
             if !folder.trim().is_empty() {
                 parts.push(format!("--folder={}", folder));
@@ -694,7 +854,10 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                 format!("--reg-file-end={}", reg_name_end),
             ];
             if !target_file_name.trim().is_empty() {
-                parts.push(format!("--target_file_name={}", target_file_name));
+                parts.push(format!(
+                    "--target_file_name={}",
+                    shell_double_quote(target_file_name)
+                ));
             }
             if *same_param_index >= 0 {
                 parts.push(format!("--same_param_index={}", same_param_index));
@@ -729,7 +892,10 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                 format!("-d={}", duration),
             ];
             if !target_file_name.trim().is_empty() {
-                parts.push(format!("--target_file_name={}", target_file_name));
+                parts.push(format!(
+                    "--target_file_name={}",
+                    shell_double_quote(target_file_name)
+                ));
             }
             parts.join(" ")
         }
@@ -810,6 +976,11 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
             url: String::new(),
             m3u8_name: String::new(),
             header: HashMap::new(),
+            target_file_name: String::new(),
+            folder: folder_name.clone(),
+            concurrent: 10,
+            download_dir: "download".to_string(),
+            ffmpeg_download: false,
         });
         let result_path = detect_result_video(&folder_path);
         let timestamp = folder_path
@@ -821,18 +992,30 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
             .unwrap_or_else(now);
         let payload = TaskPayload::Download {
             url: base_info.url.clone(),
-            ffmpeg_download: false,
-            target_file_name: result_path
-                .as_ref()
-                .and_then(|value| {
-                    Path::new(value)
-                        .file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                })
-                .unwrap_or_default(),
+            ffmpeg_download: base_info.ffmpeg_download,
+            target_file_name: if !base_info.target_file_name.trim().is_empty() {
+                base_info.target_file_name.clone()
+            } else {
+                result_path
+                    .as_ref()
+                    .and_then(|value| {
+                        Path::new(value)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_default()
+            },
             folder: folder_name.clone(),
-            concurrent: 10,
-            download_dir: "download".to_string(),
+            concurrent: if base_info.concurrent > 0 {
+                base_info.concurrent
+            } else {
+                10
+            },
+            download_dir: if base_info.download_dir.trim().is_empty() {
+                "download".to_string()
+            } else {
+                base_info.download_dir.clone()
+            },
             headers: normalize_headers(base_info.header),
         };
         let status = if result_path.is_some() {
@@ -912,6 +1095,64 @@ fn resolve_task_directory(task: &TaskRecord) -> Option<PathBuf> {
         }),
         _ => None,
     }
+
+    fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> TaskPayload {
+        match payload {
+            TaskPayload::Download {
+                folder,
+                download_dir,
+                url,
+                ffmpeg_download,
+                target_file_name,
+                concurrent,
+                headers,
+            } => {
+                let base_info = task_dir.and_then(|path| read_task_base_info(&path));
+                if let Some(info) = base_info {
+                    TaskPayload::Download {
+                        url: if info.url.trim().is_empty() {
+                            url
+                        } else {
+                            info.url
+                        },
+                        ffmpeg_download: info.ffmpeg_download || ffmpeg_download,
+                        target_file_name: if info.target_file_name.trim().is_empty() {
+                            target_file_name
+                        } else {
+                            info.target_file_name
+                        },
+                        folder,
+                        concurrent: if info.concurrent > 0 {
+                            info.concurrent
+                        } else {
+                            concurrent
+                        },
+                        download_dir: if info.download_dir.trim().is_empty() {
+                            download_dir
+                        } else {
+                            info.download_dir
+                        },
+                        headers: if info.header.is_empty() {
+                            headers
+                        } else {
+                            normalize_headers(info.header)
+                        },
+                    }
+                } else {
+                    TaskPayload::Download {
+                        url,
+                        ffmpeg_download,
+                        target_file_name,
+                        folder,
+                        concurrent,
+                        download_dir,
+                        headers,
+                    }
+                }
+            }
+            other => other,
+        }
+    }
 }
 
 fn default_header_presets() -> Vec<HeaderPreset> {
@@ -963,6 +1204,10 @@ fn serialize_headers(headers: &HashMap<String, String>) -> String {
 
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn shell_double_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn normalize_headers(headers: HashMap<String, String>) -> HashMap<String, String> {

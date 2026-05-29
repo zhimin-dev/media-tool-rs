@@ -57,9 +57,21 @@ export type TaskDetail = {
   task: TaskRecord
   output_dir: string | null
   output_files: string[]
+  base_info: BaseInfo | null
 }
 
 export type HeaderPreset = {
   host: string
   headers: Record<string, string>
+}
+
+export type BaseInfo = {
+  url: string
+  m3u8_name: string
+  header: Record<string, string>
+  target_file_name: string
+  folder: string
+  concurrent: number
+  download_dir: string
+  ffmpeg_download: boolean
 }

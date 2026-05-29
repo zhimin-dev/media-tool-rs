@@ -44,6 +44,16 @@ pub struct BaseInfo {
     pub m3u8_name: String,
     #[serde(default)]
     pub header: HashMap<String, String>,
+    #[serde(default)]
+    pub target_file_name: String,
+    #[serde(default)]
+    pub folder: String,
+    #[serde(default)]
+    pub concurrent: i32,
+    #[serde(default)]
+    pub download_dir: String,
+    #[serde(default)]
+    pub ffmpeg_download: bool,
 }
 
 impl BaseInfo {
@@ -52,6 +62,11 @@ impl BaseInfo {
             url: "".to_string(),
             m3u8_name: "".to_string(),
             header: HashMap::new(),
+            target_file_name: "".to_string(),
+            folder: "".to_string(),
+            concurrent: 10,
+            download_dir: "download".to_string(),
+            ffmpeg_download: false,
         }
     }
     pub fn set_host(&mut self, url: String) {
@@ -64,6 +79,26 @@ impl BaseInfo {
 
     pub fn set_header(&mut self, header: HashMap<String, String>) {
         self.header = header
+    }
+
+    pub fn set_target_file_name(&mut self, target_file_name: String) {
+        self.target_file_name = target_file_name
+    }
+
+    pub fn set_folder(&mut self, folder: String) {
+        self.folder = folder
+    }
+
+    pub fn set_concurrent(&mut self, concurrent: i32) {
+        self.concurrent = concurrent
+    }
+
+    pub fn set_download_dir(&mut self, download_dir: String) {
+        self.download_dir = download_dir
+    }
+
+    pub fn set_ffmpeg_download(&mut self, ffmpeg_download: bool) {
+        self.ffmpeg_download = ffmpeg_download
     }
 
     pub fn generate(self, folder: String) -> Result<(), Error> {
@@ -109,10 +144,12 @@ pub mod download {
 
     pub async fn fast_download(
         pass_url: String,
-        _file_name: String,
+        file_name: String,
         folder: String,
         concurrent: i32,
         pass_headers: HashMap<String, String>,
+        download_dir: String,
+        ffmpeg_download: bool,
     ) -> Result<bool, Error> {
         let mut hls_m3u;
         let mut url = pass_url;
@@ -138,6 +175,11 @@ pub mod download {
         base_info_obj.set_host(url.clone());
         base_info_obj.set_m3u8_name(m3u8_file_name.clone());
         base_info_obj.set_header(headers.clone());
+        base_info_obj.set_target_file_name(file_name.clone());
+        base_info_obj.set_folder(folder.clone());
+        base_info_obj.set_concurrent(concurrent);
+        base_info_obj.set_download_dir(download_dir);
+        base_info_obj.set_ffmpeg_download(ffmpeg_download);
         let _ = base_info_obj.generate(base_info.to_string());
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");
@@ -245,7 +287,7 @@ pub mod download {
             String::from(format!("(.*).{}", hls_m3u.extension)),
             start,
             end,
-            _file_name.clone(),
+            file_name.clone(),
             hls_m3u.method,
             folder.clone(),
             hls_m3u.iv,
@@ -255,7 +297,7 @@ pub mod download {
         )
         .await?;
         return if res {
-            let f_name = format!("{}", _file_name.clone());
+            let f_name = format!("{}", file_name.clone());
             println!("---f_name {}", f_name.clone());
             check_video_validity(f_name.as_str())
         } else {

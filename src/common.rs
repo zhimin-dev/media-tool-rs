@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fmt::{format, Error};
 use std::fs;
 use std::fs::File;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::Error as IoError;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 pub fn now() -> u64 {
@@ -44,7 +45,7 @@ pub async fn download_file(
     url: String,
     file_name: String,
     headers: &HashMap<String, String>,
-) -> Result<bool, Error> {
+) -> Result<bool, IoError> {
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
         let name = HeaderName::from_bytes(key.as_bytes());
@@ -59,20 +60,34 @@ pub async fn download_file(
         }
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| {
+            println!("create reqwest client error: {}", error);
+            IoError::other(error.to_string())
+        })?;
     let resp = client
         .get(&url)
         .headers(header_map)
+        .timeout(Duration::from_secs(30))
         .send()
         .await
-        .expect("get url data error");
+        .map_err(|error| {
+            println!("get url data error: {}", error);
+            IoError::other(error.to_string())
+        })?;
     if resp.status() == 200 {
         let body = resp.bytes().await;
         match body {
             Ok(bytes) => {
-                fs::write(file_name.clone(), bytes)
-                    .expect(format!("write file error {}", file_name.clone()).as_str());
-                Ok(true)
+                fs::write(file_name.clone(), bytes).map_or_else(
+                    |error| {
+                        println!("write file error {}: {}", file_name.clone(), error);
+                        Ok(false)
+                    },
+                    |_| Ok(true),
+                )
             }
             Err(e) => {
                 println!("get data error");
