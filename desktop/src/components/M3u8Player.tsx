@@ -19,6 +19,25 @@ function isM3u8Url(url: string) {
 }
 
 function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
+  const sanitizedUrl = useMemo(() => sanitizeVideoUrl(url), [url])
+
+  return (
+    <M3u8PlayerContent
+      key={sanitizedUrl || 'empty-player'}
+      url={url}
+      sanitizedUrl={sanitizedUrl}
+      headers={headers}
+    />
+  )
+}
+
+type M3u8PlayerContentProps = {
+  url: string
+  sanitizedUrl: string
+  headers: Record<string, string>
+}
+
+function M3u8PlayerContent({ url, sanitizedUrl, headers }: M3u8PlayerContentProps) {
   const playerHostRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<ReturnType<typeof videojs> | null>(null)
   const requestHookRef = useRef<((options: VideoJsRequestOptions) => VideoJsRequestOptions) | null>(null)
@@ -28,7 +47,6 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
   const preferNativeHls = useMemo(() => preferNativeHlsPlayback(), [])
   const [useNativeHls, setUseNativeHls] = useState(preferNativeHls)
   const [triedDecodeFallback, setTriedDecodeFallback] = useState(false)
-  const sanitizedUrl = useMemo(() => sanitizeVideoUrl(url), [url])
   const [isPlaying, setIsPlaying] = useState(false)
   const playbackModeLabel = useMemo(() => (useNativeHls ? 'Native HLS' : 'VHS (MSE)'), [useNativeHls])
   const helperMessage = useMemo(() => {
@@ -124,11 +142,6 @@ function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
       host.innerHTML = ''
     }
   }, [sanitizedUrl, useNativeHls])
-
-  useEffect(() => {
-    setUseNativeHls(preferNativeHls)
-    setTriedDecodeFallback(false)
-  }, [preferNativeHls, sanitizedUrl])
 
   useEffect(() => {
     const player = playerRef.current

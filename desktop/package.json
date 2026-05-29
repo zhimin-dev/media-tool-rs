@@ -17,6 +17,7 @@
     "internal-ip": "^7.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-router-dom": "^7.16.0",
     "video.js": "^8.23.7"
   },
   "devDependencies": {

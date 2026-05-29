@@ -75,3 +75,8 @@ export type BaseInfo = {
   download_dir: string
   ffmpeg_download: boolean
 }
+
+export type HeaderRow = {
+  key: string
+  value: string
+}
