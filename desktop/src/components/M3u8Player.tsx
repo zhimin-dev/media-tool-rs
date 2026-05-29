@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 type M3u8PlayerProps = {
   url: string
+  headers?: Record<string, string>
 }
 
 function isM3u8Url(url: string) {
@@ -15,7 +16,7 @@ function isM3u8Url(url: string) {
   }
 }
 
-function M3u8Player({ url }: M3u8PlayerProps) {
+function M3u8Player({ url, headers = {} }: M3u8PlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [error, setError] = useState<string>('')
   const sanitizedUrl = useMemo(() => sanitizeVideoUrl(url), [url])
@@ -67,7 +68,18 @@ function M3u8Player({ url }: M3u8PlayerProps) {
       return
     }
 
-    const hls = new Hls()
+    const hasHeaders = Object.keys(headers).length > 0
+    const hls = new Hls(
+      hasHeaders
+        ? {
+            xhrSetup: (xhr) => {
+              for (const [key, value] of Object.entries(headers)) {
+                xhr.setRequestHeader(key, value)
+              }
+            },
+          }
+        : {},
+    )
     hls.loadSource(sanitizedUrl)
     hls.attachMedia(video)
     hls.on(Hls.Events.ERROR, (_, data) => {
@@ -79,7 +91,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     return () => {
       hls.destroy()
     }
-  }, [sanitizedUrl])
+  }, [sanitizedUrl, headers])
 
   const handlePlay = async () => {
     const video = videoRef.current
