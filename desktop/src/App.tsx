@@ -13,24 +13,36 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
   List,
   ListItem,
   Menu,
   MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Toolbar,
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
-import { createTask, deleteTask, fetchTaskDetail, fetchTasks, retryTask } from './api'
+import {
+  createTask,
+  deleteTask,
+  fetchHeaderPresets,
+  fetchTaskDetail,
+  fetchTasks,
+  retryTask,
+  saveHeaderPreset,
+} from './api'
 import M3u8Player from './components/M3u8Player'
 import type {
   CombinePayload,
   CutPayload,
   DownloadPayload,
+  HeaderPreset,
   TaskDetail,
   TaskPayload,
   TaskRecord,
@@ -69,6 +81,7 @@ const defaultDownloadForm: DownloadPayload = {
   folder: '',
   concurrent: 10,
   download_dir: 'download',
+  headers: {},
 }
 
 const defaultCombineForm: CombinePayload = {
@@ -93,6 +106,11 @@ const defaultCutForm: CutPayload = {
   target_file_name: '',
 }
 
+type HeaderRow = {
+  key: string
+  value: string
+}
+
 function App() {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
   const [activeTab, setActiveTab] = useState<TaskTab>('download')
@@ -108,6 +126,10 @@ function App() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
+  const [headerPresets, setHeaderPresets] = useState<HeaderPreset[]>([])
+  const [selectedPresetHost, setSelectedPresetHost] = useState('')
+  const [presetHost, setPresetHost] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -134,15 +156,42 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let alive = true
+
+    const loadHeaderPresets = async () => {
+      try {
+        const presets = await fetchHeaderPresets()
+        if (alive) {
+          setHeaderPresets(presets)
+        }
+      } catch {
+        if (alive) {
+          setError('加载 header 预设失败')
+        }
+      }
+    }
+
+    void loadHeaderPresets()
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const currentPayload = useMemo<TaskPayload>(() => {
     if (activeTab === 'download') {
-      return downloadForm
+      return {
+        ...downloadForm,
+        headers: headerRowsToMap(headerRows),
+      }
     }
     if (activeTab === 'combine') {
       return combineForm
     }
     return cutForm
-  }, [activeTab, combineForm, cutForm, downloadForm])
+  }, [activeTab, combineForm, cutForm, downloadForm, headerRows])
+
+  const matchedPresetHost = useMemo(() => getHostFromUrl(downloadForm.url), [downloadForm.url])
 
   const filteredTasks = useMemo(
     () =>
@@ -170,6 +219,64 @@ function App() {
       setError(message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleHeaderChange = (index: number, field: keyof HeaderRow, value: string) => {
+    setHeaderRows((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
+    )
+  }
+
+  const handleAddHeader = () => {
+    setHeaderRows((current) => [...current, { key: '', value: '' }])
+  }
+
+  const handleRemoveHeader = (index: number) => {
+    setHeaderRows((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index)
+      return next.length > 0 ? next : [{ key: '', value: '' }]
+    })
+  }
+
+  const handlePresetChange = (host: string) => {
+    setSelectedPresetHost(host)
+    const preset = headerPresets.find((item) => item.host === host)
+    if (preset) {
+      setHeaderRows(mapToHeaderRows(preset.headers))
+      setPresetHost(preset.host)
+    }
+  }
+
+  const handleSavePreset = async () => {
+    const host = (presetHost.trim() || matchedPresetHost).toLowerCase()
+    const headers = headerRowsToMap(headerRows)
+
+    if (!host) {
+      setError('请填写预设 host')
+      return
+    }
+
+    if (Object.keys(headers).length === 0) {
+      setError('请至少填写一个 header')
+      return
+    }
+
+    try {
+      const preset = await saveHeaderPreset({ host, headers })
+      setHeaderPresets((current) => {
+        const next = current.filter((item) => item.host !== preset.host)
+        next.push(preset)
+        next.sort((left, right) => left.host.localeCompare(right.host))
+        return next
+      })
+      setSelectedPresetHost(preset.host)
+      setPresetHost(preset.host)
+      setSuccessMessage('header 预设已保存')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '保存预设失败'
+      setError(message)
     }
   }
 
@@ -324,7 +431,13 @@ function App() {
                 fullWidth
                 label="m3u8 链接"
                 value={downloadForm.url}
-                onChange={(event) => setDownloadForm((current) => ({ ...current, url: event.target.value }))}
+                onChange={(event) => {
+                  const url = event.target.value
+                  setDownloadForm((current) => ({ ...current, url }))
+                  if (!presetHost) {
+                    setPresetHost(getHostFromUrl(url))
+                  }
+                }}
               />
               <TextField
                 fullWidth
@@ -340,6 +453,62 @@ function App() {
                 value={downloadForm.folder}
                 onChange={(event) => setDownloadForm((current) => ({ ...current, folder: event.target.value }))}
               />
+              <FormControl fullWidth>
+                <InputLabel id="header-preset-label">header 预设</InputLabel>
+                <Select
+                  labelId="header-preset-label"
+                  label="header 预设"
+                  value={selectedPresetHost}
+                  onChange={(event) => handlePresetChange(event.target.value)}
+                >
+                  <MenuItem value="">不使用预设</MenuItem>
+                  {headerPresets.map((preset) => (
+                    <MenuItem key={preset.host} value={preset.host}>
+                      {preset.host}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <TextField
+                  fullWidth
+                  label="预设 Host"
+                  placeholder="例如 surrit.com"
+                  value={presetHost}
+                  onChange={(event) => setPresetHost(event.target.value)}
+                  helperText={matchedPresetHost ? `当前链接 host：${matchedPresetHost}` : '可留空，默认使用当前链接 host'}
+                />
+                <Button variant="outlined" onClick={() => void handleSavePreset()}>
+                  保存为预设
+                </Button>
+              </Stack>
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">自定义 Header</Typography>
+                {headerRows.map((row, index) => (
+                  <Stack key={`${index}-${row.key}`} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <TextField
+                      fullWidth
+                      label="Header 名称"
+                      value={row.key}
+                      onChange={(event) => handleHeaderChange(index, 'key', event.target.value)}
+                    />
+                    <TextField
+                      fullWidth
+                      label="Header 值"
+                      value={row.value}
+                      onChange={(event) => handleHeaderChange(index, 'value', event.target.value)}
+                    />
+                    <Button color="error" variant="outlined" onClick={() => handleRemoveHeader(index)}>
+                      删除
+                    </Button>
+                  </Stack>
+                ))}
+                <Box>
+                  <Button variant="text" onClick={handleAddHeader}>
+                    添加 Header
+                  </Button>
+                </Box>
+              </Stack>
             </Stack>
           ) : null}
           {activeTab === 'combine' ? (
@@ -465,6 +634,9 @@ function buildCommandPreview(payload: TaskPayload) {
       if (payload.download_dir !== 'download') {
         parts.push(`--download_dir=${payload.download_dir}`)
       }
+      if (Object.keys(payload.headers).length > 0) {
+        parts.push(`--headers=${Object.keys(payload.headers).length}`)
+      }
       return parts.join(' ')
     }
     case 'combine': {
@@ -514,6 +686,30 @@ function validatePayload(payload: TaskPayload) {
       if (payload.duration <= 0) {
         throw new Error('持续时长必须大于 0')
       }
+  }
+}
+
+function headerRowsToMap(rows: HeaderRow[]) {
+  return rows.reduce<Record<string, string>>((result, row) => {
+    const key = row.key.trim()
+    const value = row.value.trim()
+    if (key && value) {
+      result[key] = value
+    }
+    return result
+  }, {})
+}
+
+function mapToHeaderRows(headers: Record<string, string>) {
+  const rows = Object.entries(headers).map(([key, value]) => ({ key, value }))
+  return rows.length > 0 ? rows : [{ key: '', value: '' }]
+}
+
+function getHostFromUrl(url: string) {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return ''
   }
 }
 
