@@ -179,15 +179,24 @@ struct ServeVideoQuery {
 async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> HttpResponse {
     let requested_path = PathBuf::from(&query.path);
 
-    let Ok(canonical) = requested_path.canonicalize() else {
-        return HttpResponse::NotFound().body("file not found");
-    };
-
-    if !canonical.is_file() {
-        return HttpResponse::NotFound().body("not a file");
+    // Security: only allow absolute paths (no path traversal via relative paths)
+    if !requested_path.is_absolute() {
+        return HttpResponse::Forbidden().body("only absolute paths are allowed");
     }
 
-    let extension = canonical
+    // Security: reject any path containing parent directory components
+    if requested_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return HttpResponse::Forbidden().body("path traversal not allowed");
+    }
+
+    if !requested_path.is_file() {
+        return HttpResponse::NotFound().body("file not found");
+    }
+
+    let extension = requested_path
         .extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
@@ -198,7 +207,7 @@ async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> Ht
         return HttpResponse::Forbidden().body("unsupported file type");
     }
 
-    match actix_files::NamedFile::open(&canonical) {
+    match actix_files::NamedFile::open(&requested_path) {
         Ok(file) => file.into_response(&req),
         Err(_) => HttpResponse::InternalServerError().body("failed to read file"),
     }
@@ -291,7 +300,11 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
         payload,
     );
     let payload = task.payload.clone();
-    state.tasks.write().await.insert(id, task.clone());
+    {
+        let mut tasks = state.tasks.write().await;
+        tasks.remove(&source_id);
+        tasks.insert(id, task.clone());
+    }
 
     let background_state = state.get_ref().clone();
     tokio::spawn(async move {
