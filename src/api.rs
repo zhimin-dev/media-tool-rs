@@ -123,6 +123,9 @@ impl AppState {
         let tasks = load_download_tasks(current_dir.join("download"));
         let next_id = tasks.keys().copied().max().unwrap_or(0) + 1;
         let header_presets_path = current_dir.join("header_presets.json");
+        if let Err(error) = ensure_header_presets_file(&header_presets_path) {
+            println!("failed to initialize header_presets.json: {}", error);
+        }
         Self {
             tasks: Arc::new(RwLock::new(tasks)),
             next_id: Arc::new(AtomicU64::new(next_id)),
@@ -1203,10 +1206,15 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
 }
 
 fn default_header_presets() -> Vec<HeaderPreset> {
-    vec![HeaderPreset {
-        host: "surrit.com".to_string(),
-        headers: HashMap::from([("origin".to_string(), "https://missav.live".to_string())]),
-    }]
+    vec![]
+}
+
+fn ensure_header_presets_file(path: &PathBuf) -> std::io::Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    let defaults = default_header_presets();
+    write_header_presets(path, &defaults)
 }
 
 fn load_header_presets(path: &PathBuf) -> Vec<HeaderPreset> {

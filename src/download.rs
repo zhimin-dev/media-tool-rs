@@ -325,6 +325,8 @@ pub mod download {
         let mut target = file_name;
         if target.is_empty() {
             target = format!("{}.mp4", now());
+        } else if std::path::Path::new(&target).extension().is_none() {
+            target = format!("{}.mp4", target);
         }
         target
     }

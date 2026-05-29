@@ -77,9 +77,17 @@ pub mod cmd {
     use std::path::Path;
     use std::process::{Command, Stdio};
 
+    fn ensure_output_extension(target: &str, default_ext: &str) -> String {
+        if Path::new(target).extension().is_none() {
+            format!("{}.{}", target, default_ext)
+        } else {
+            target.to_string()
+        }
+    }
+
     pub fn cut(file: String, start: u32, duration: u32, target: String) -> Result<bool, Error> {
-        let mut binding = Command::new("ffmpeg");
-        let res = binding
+        let target_with_ext = ensure_output_extension(&target, "mp4");
+        let output = Command::new("ffmpeg")
             .arg("-i")
             .arg(file)
             .arg("-ss")
@@ -90,14 +98,14 @@ pub mod cmd {
             .arg("libx264")
             .arg("-c:a")
             .arg("aac")
-            .arg(target)
+            .arg(target_with_ext)
             .output()
-            .unwrap()
-            .status;
-        if res.success() {
+            .unwrap();
+        if output.status.success() {
             Ok(true)
         } else {
-            println!("ffmpeg 截取失败-{}", res.to_string());
+            println!("ffmpeg 截取失败-{}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
@@ -126,8 +134,14 @@ pub mod cmd {
                 let entry = entry.unwrap();
                 let path = entry.path();
 
-                if path.is_file() && path.extension().unwrap().as_encoded_bytes() == i.as_bytes() {
-                    fs::remove_file(path).unwrap();
+                if !path.is_file() {
+                    continue;
+                }
+
+                if let Some(ext) = path.extension() {
+                    if ext.as_encoded_bytes() == i.as_bytes() {
+                        fs::remove_file(path).unwrap();
+                    }
                 }
             }
         }
@@ -135,44 +149,44 @@ pub mod cmd {
     }
 
     pub fn download(url: String, file_name: String) -> Result<bool, Error> {
-        let mut binding = Command::new("ffmpeg");
-        let res = binding
+        let target_with_ext = ensure_output_extension(&file_name, "mp4");
+        let output = Command::new("ffmpeg")
             .arg("-i")
             .arg(url.to_owned())
             .arg("-c")
             .arg("copy")
             .arg("-bsf:a")
             .arg("aac_adtstoasc")
-            .arg(file_name.to_owned())
+            .arg(target_with_ext)
             .output()
-            .unwrap()
-            .status;
-        if res.success() {
+            .unwrap();
+        if output.status.success() {
             Ok(true)
         } else {
-            println!("{}", res.to_string());
+            println!("ffmpeg 下载失败-{}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
 
     //ffmpeg -f concat -i input.txt -c copy output.mp4
     pub fn combine(file: String, target: String) -> Result<bool, Error> {
-        let mut binding = Command::new("ffmpeg");
-        let res = binding
+        let target_with_ext = ensure_output_extension(&target, "mp4");
+        let output = Command::new("ffmpeg")
             .arg("-f")
             .arg("concat")
             .arg("-i")
             .arg(file)
             .arg("-c")
             .arg("copy")
-            .arg(target)
+            .arg(target_with_ext)
             .output()
-            .unwrap()
-            .status;
-        if res.success() {
+            .unwrap();
+        if output.status.success() {
             Ok(true)
         } else {
-            println!("ffmpeg error---{}", res.to_string());
+            println!("ffmpeg 合并失败-{}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
@@ -188,8 +202,8 @@ pub mod cmd {
         width: i32,
         height: i32,
     ) -> Result<bool, Error> {
-        let mut binding = Command::new("ffmpeg");
-        let res = binding
+        let target_with_ext = ensure_output_extension(&target, "mp4");
+        let output = Command::new("ffmpeg")
             .arg("-i")
             .arg(file)
             .arg("-vf")
@@ -204,40 +218,41 @@ pub mod cmd {
             .arg("libx264".to_string())
             .arg("-c:a")
             .arg("aac".to_string())
-            .arg(target)
+            .arg(target_with_ext)
             .output()
-            .unwrap()
-            .status;
-        if res.success() {
+            .unwrap();
+        if output.status.success() {
             Ok(true)
         } else {
-            println!("{}", res.to_string());
+            println!("ffmpeg 转码失败-{}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
 
     //ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
     pub fn combine_ts(file: String, target: String) -> Result<bool, Error> {
-        println!("{} file --- target {}", file.clone(), target.clone());
-        let mut binding = Command::new("ffmpeg");
-        let res = binding
+        let target_with_ext = ensure_output_extension(&target, "mp4");
+        println!("{} file --- target {}", file.clone(), target_with_ext.clone());
+        let output = Command::new("ffmpeg")
+            .arg("-y")
             .arg("-f")
             .arg("concat")
             .arg("-safe")
             .arg("0")
             .arg("-i")
-            .arg(file)
+            .arg(&file)
             .arg("-c")
             .arg("copy")
-            .arg(target)
+            .arg(&target_with_ext)
             .output()
-            .unwrap()
-            .status;
-        if res.success() {
-            println!("-ffmpeg code {}", res.success());
+            .unwrap();
+
+        if output.status.success() {
             Ok(true)
         } else {
-            println!("combine_ts error,ffmpeg code:{}", res.to_string());
+            println!("combine_ts error, ffmpeg code: {}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
