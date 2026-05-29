@@ -497,7 +497,7 @@ function App() {
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              media-tool-rs
+              {tabLabelMap[activeTab]}
             </Typography>
           </Stack>
         </Toolbar>
@@ -664,9 +664,6 @@ function App() {
             </Stack>
           ) : (
             <>
-              <Button variant="contained" onClick={() => setCreateDialogOpen(true)}>
-                {createTitle}
-              </Button>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Stack
                   direction={{ xs: 'column', sm: 'row' }}
@@ -675,6 +672,9 @@ function App() {
                 >
                   <Typography variant="h6">任务列表</Typography>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Button variant="contained" size="small" onClick={() => setCreateDialogOpen(true)}>
+                      {createTitle}
+                    </Button>
                     <Button variant="outlined" size="small" onClick={() => void handleManualRefresh()}>
                       手动刷新
                     </Button>
