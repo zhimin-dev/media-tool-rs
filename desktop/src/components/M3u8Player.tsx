@@ -40,7 +40,6 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     video.load()
 
     if (!sanitizedUrl) {
-      setIsPlaying(false)
       return
     }
 

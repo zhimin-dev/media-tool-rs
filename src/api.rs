@@ -600,52 +600,49 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             parts.join(" ")
         }
     }
+}
 
-    fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>) {
-        let current_dir = env::current_dir().ok();
-        let output_dir = match &task.payload {
-            TaskPayload::Download {
-                folder,
-                download_dir,
-                url,
-                ..
-            } => current_dir.clone().map(|base| {
-                let folder_name = resolve_download_folder_name(url, folder);
-                base.join(download_dir).join(folder_name)
-            }),
-            TaskPayload::Combine { .. } => task
-                .result_path
-                .as_ref()
-                .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
-                .or(current_dir.clone()),
-            TaskPayload::Cut { .. } => current_dir.map(|base| base.join("cut")),
-        };
-
-        let files = output_dir
+fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>) {
+    let current_dir = env::current_dir().ok();
+    let output_dir = match &task.payload {
+        TaskPayload::Download {
+            folder,
+            download_dir,
+            url,
+            ..
+        } => current_dir.clone().map(|base| {
+            let folder_name = resolve_download_folder_name(url, folder);
+            base.join(download_dir).join(folder_name)
+        }),
+        TaskPayload::Combine { .. } => task
+            .result_path
             .as_ref()
-            .map(read_directory_entries)
-            .unwrap_or_default();
+            .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
+            .or(current_dir.clone()),
+        TaskPayload::Cut { .. } => current_dir.map(|base| base.join("cut")),
+    };
 
-        (
-            output_dir.map(|path| path.display().to_string()),
-            files,
-        )
+    let files = output_dir
+        .as_ref()
+        .map(read_directory_entries)
+        .unwrap_or_default();
+
+    (output_dir.map(|path| path.display().to_string()), files)
+}
+
+fn read_directory_entries(path: &PathBuf) -> Vec<String> {
+    if !path.exists() {
+        return Vec::new();
     }
 
-    fn read_directory_entries(path: &PathBuf) -> Vec<String> {
-        if !path.exists() {
-            return Vec::new();
-        }
-
-        let mut names = fs::read_dir(path)
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
-            .collect::<Vec<_>>();
-        names.sort();
-        names
-    }
+    let mut names = fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
+        .collect::<Vec<_>>();
+    names.sort();
+    names
 }
