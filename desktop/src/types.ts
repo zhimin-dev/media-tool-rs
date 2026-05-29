@@ -51,3 +51,9 @@ export type CreateTaskRequest = {
   title?: string
   payload: TaskPayload
 }
+
+export type TaskDetail = {
+  task: TaskRecord
+  output_dir: string | null
+  output_files: string[]
+}

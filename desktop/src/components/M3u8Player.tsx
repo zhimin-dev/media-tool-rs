@@ -1,4 +1,4 @@
-import { Alert, Box, Paper, Typography } from '@mui/material'
+import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import Hls from 'hls.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -14,6 +14,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     const video = document.createElement('video')
     return Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
   }, [])
+  const [isPlaying, setIsPlaying] = useState(false)
   const helperMessage = useMemo(() => {
     if (!url) {
       return ''
@@ -39,6 +40,7 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     video.load()
 
     if (!sanitizedUrl) {
+      setIsPlaying(false)
       return
     }
 
@@ -65,6 +67,45 @@ function M3u8Player({ url }: M3u8PlayerProps) {
     }
   }, [sanitizedUrl])
 
+  const handlePlay = async () => {
+    const video = videoRef.current
+    if (!video) {
+      return
+    }
+    try {
+      await video.play()
+      setIsPlaying(true)
+    } catch {
+      setError('播放失败，请检查链接是否可访问')
+    }
+  }
+
+  const handlePause = () => {
+    const video = videoRef.current
+    if (!video) {
+      return
+    }
+    video.pause()
+    setIsPlaying(false)
+  }
+
+  const handlePiP = async () => {
+    const video = videoRef.current
+    if (!video) {
+      return
+    }
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+      } else if ('requestPictureInPicture' in video) {
+        await video.requestPictureInPicture()
+      }
+    } catch {
+      setError('当前设备不支持小窗播放')
+    }
+  }
+
   return (
     <Paper variant="outlined" sx={{ p: 2.5, height: '100%' }}>
       <Typography variant="h6" gutterBottom>
@@ -74,6 +115,17 @@ function M3u8Player({ url }: M3u8PlayerProps) {
         支持在线播放 m3u8 链接，可用于任务创建前预览。
       </Typography>
       {helperMessage ? <Alert sx={{ mb: 2 }}>{helperMessage}</Alert> : null}
+      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+        <Button variant="contained" size="small" onClick={handlePlay} disabled={!sanitizedUrl}>
+          播放
+        </Button>
+        <Button variant="outlined" size="small" onClick={handlePause} disabled={!isPlaying}>
+          暂停
+        </Button>
+        <Button variant="outlined" size="small" onClick={handlePiP} disabled={!sanitizedUrl}>
+          小窗播放
+        </Button>
+      </Stack>
       <Box
         sx={{
           backgroundColor: '#000',
