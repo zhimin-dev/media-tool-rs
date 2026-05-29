@@ -375,9 +375,10 @@ function App() {
     }
 
     setError('')
-    const normalized = task.result_path.replaceAll('\\', '/')
-    const url = `file://${encodeURI(normalized)}`
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const apiBase = import.meta.env.VITE_API_BASE_URL ?? '/api'
+    const videoUrl = `${apiBase}/serve-video?path=${encodeURIComponent(task.result_path)}`
+    setPlayerUrl(videoUrl)
+    setActiveTab('watch')
   }
 
   const handleOpenBaseInfoEditor = async (taskId: number) => {
@@ -729,6 +730,16 @@ function App() {
               ) : (
                 <Alert severity="info">未选择 header 预设时，将不会传入下载 header。</Alert>
               )}
+              <TextField
+                fullWidth
+                label="并发数"
+                type="number"
+                value={downloadForm.concurrent}
+                onChange={(event) =>
+                  setDownloadForm((current) => ({ ...current, concurrent: Number(event.target.value) }))
+                }
+                slotProps={{ htmlInput: { min: 1 } }}
+              />
               <Button
                 variant="outlined"
                 onClick={() => {
