@@ -16,6 +16,7 @@
     "@mui/material": "^9.0.1",
     "hls.js": "^1.6.16",
     "react": "^19.2.6",
+    "internal-ip": "^7.0.0",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {

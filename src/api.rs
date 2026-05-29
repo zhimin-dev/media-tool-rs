@@ -3,7 +3,7 @@ use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
-use actix_files::Files;
+use actix_files::{Files, NamedFile};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -162,7 +162,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/header-presets", web::post().to(save_header_preset))
             .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
             .route("/api/serve-video", web::get().to(serve_video))
-            .service(Files::new("/static", "./static"))
+            .service(Files::new("/static", "./static").disable_content_disposition())
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -212,8 +212,8 @@ async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> Ht
         return HttpResponse::Forbidden().body("unsupported file type");
     }
 
-    match actix_files::NamedFile::open(&requested_path) {
-        Ok(file) => file.into_response(&req),
+    match NamedFile::open(&requested_path) {
+        Ok(file) => file.disable_content_disposition().into_response(&req),
         Err(_) => HttpResponse::InternalServerError().body("failed to read file"),
     }
 }

@@ -8,3 +8,6 @@
 /desktop/node_modules/
 /desktop/dist/
 header_presets.json
+.DS_Store
+/static/download/
+/static/cut/

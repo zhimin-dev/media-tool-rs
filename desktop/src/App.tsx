@@ -375,8 +375,7 @@ function App() {
     }
 
     setError('')
-    const apiBase = import.meta.env.VITE_API_BASE_URL ?? '/api'
-    const videoUrl = `${apiBase}/serve-video?path=${encodeURIComponent(task.result_path)}`
+    const videoUrl = `/static/download/${task.payload.folder}/${task.payload.target_file_name}`
     setPlayerUrl(videoUrl)
     setActiveTab('watch')
   }
