@@ -1,6 +1,8 @@
 import TaskListPage, { type TaskListPageProps } from '../components/TaskListPage'
 
-function CombinePage(props: TaskListPageProps) {
+type CombinePageProps = Omit<TaskListPageProps, 'createButtonLabel'>
+
+function CombinePage(props: CombinePageProps) {
   return <TaskListPage {...props} createButtonLabel="新建合并任务" />
 }
 

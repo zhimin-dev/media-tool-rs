@@ -364,7 +364,7 @@ function App() {
   }
 
   const handleOpenVideo = (task: TaskRecord) => {
-    if (!task.result_path) {
+    if (task.payload.kind !== 'download' || !task.result_path) {
       setError('未找到视频输出文件')
       return
     }

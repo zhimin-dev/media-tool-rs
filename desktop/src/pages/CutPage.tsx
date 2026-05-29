@@ -1,6 +1,8 @@
 import TaskListPage, { type TaskListPageProps } from '../components/TaskListPage'
 
-function CutPage(props: TaskListPageProps) {
+type CutPageProps = Omit<TaskListPageProps, 'createButtonLabel'>
+
+function CutPage(props: CutPageProps) {
   return <TaskListPage {...props} createButtonLabel="新建截取任务" />
 }
 
