@@ -112,27 +112,31 @@ pub mod download {
         _file_name: String,
         folder: String,
         concurrent: i32,
+        custom_headers: HashMap<String, String>,
     ) -> Result<bool, Error> {
         let mut hls_m3u;
         let mut url = pass_url;
         let base_info = "base_info.json";
         let mut m3u8_file_name = format!("{}.m3u8", now());
-        let mut base_info_obj = BaseInfo::new();
-        let mut headers = HashMap::new();
+        let mut headers = custom_headers;
         let read_base_info = read_base_info(&base_info.to_string());
         match read_base_info {
             Ok(base_info_data) => {
                 m3u8_file_name = base_info_data.m3u8_name;
-                url = base_info_data.url;
-                headers = base_info_data.header;
+                if url.trim().is_empty() {
+                    url = base_info_data.url;
+                }
+                if headers.is_empty() {
+                    headers = base_info_data.header;
+                }
             }
-            Err(_) => {
-                base_info_obj.set_host(url.clone());
-                base_info_obj.set_m3u8_name(m3u8_file_name.clone());
-                base_info_obj.set_header(headers.clone());
-                let _ = base_info_obj.generate(base_info.to_string());
-            }
+            Err(_) => {}
         }
+        let mut base_info_obj = BaseInfo::new();
+        base_info_obj.set_host(url.clone());
+        base_info_obj.set_m3u8_name(m3u8_file_name.clone());
+        base_info_obj.set_header(headers.clone());
+        let _ = base_info_obj.generate(base_info.to_string());
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");
             hls_m3u = parse_local(

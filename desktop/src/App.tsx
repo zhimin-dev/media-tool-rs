@@ -10,6 +10,7 @@ import {
   Divider,
   FormControlLabel,
   Grid,
+  MenuItem,
   Paper,
   Stack,
   Switch,
@@ -20,12 +21,13 @@ import {
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
-import { createTask, fetchTasks } from './api'
+import { createHeaderPreset, createTask, fetchHeaderPresets, fetchTasks } from './api'
 import M3u8Player from './components/M3u8Player'
 import type {
   CombinePayload,
   CutPayload,
   DownloadPayload,
+  HeaderPreset,
   TaskPayload,
   TaskRecord,
   TaskStatus,
@@ -56,6 +58,7 @@ const defaultDownloadForm: DownloadPayload = {
   folder: '',
   concurrent: 10,
   download_dir: 'download',
+  headers: {},
 }
 
 const defaultCombineForm: CombinePayload = {
@@ -88,6 +91,13 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [playerUrl, setPlayerUrl] = useState('')
   const [downloadForm, setDownloadForm] = useState(defaultDownloadForm)
+  const [downloadHeaders, setDownloadHeaders] = useState([
+    { id: crypto.randomUUID(), key: '', value: '' },
+  ])
+  const [headerPresets, setHeaderPresets] = useState<HeaderPreset[]>([])
+  const [selectedPresetId, setSelectedPresetId] = useState('')
+  const [presetName, setPresetName] = useState('')
+  const [presetHost, setPresetHost] = useState('')
   const [combineForm, setCombineForm] = useState(defaultCombineForm)
   const [cutForm, setCutForm] = useState(defaultCutForm)
 
@@ -119,17 +129,69 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const loadPresets = async () => {
+      try {
+        const records = await fetchHeaderPresets()
+        setHeaderPresets(records)
+      } catch {
+        // no-op
+      }
+    }
+    void loadPresets()
+  }, [])
+
   const currentPayload = useMemo<TaskPayload>(() => {
     if (tab === 0) {
-      return downloadForm
+      return { ...downloadForm, headers: toHeaderMap(downloadHeaders) }
     }
     if (tab === 1) {
       return combineForm
     }
     return cutForm
-  }, [combineForm, cutForm, downloadForm, tab])
+  }, [combineForm, cutForm, downloadForm, downloadHeaders, tab])
 
   const commandPreview = useMemo(() => buildCommandPreview(currentPayload), [currentPayload])
+
+  const applyPreset = (presetId: string) => {
+    setSelectedPresetId(presetId)
+    const preset = headerPresets.find((item) => item.id === presetId)
+    if (!preset) {
+      setDownloadHeaders([{ id: crypto.randomUUID(), key: '', value: '' }])
+      return
+    }
+    setDownloadHeaders(
+      Object.entries(preset.headers).map(([key, value]) => ({
+        id: crypto.randomUUID(),
+        key,
+        value,
+      })),
+    )
+  }
+
+  const handleSavePreset = async () => {
+    const headers = toHeaderEntries(downloadHeaders)
+    const host = presetHost.trim() || getHostFromUrl(downloadForm.url)
+    if (!presetName.trim() || !host || headers.length === 0) {
+      setError('请填写预设名称、host，并至少添加一个 header')
+      return
+    }
+    try {
+      const saved = await createHeaderPreset({
+        name: presetName.trim(),
+        host,
+        headers,
+      })
+      const records = await fetchHeaderPresets()
+      setHeaderPresets(records)
+      setSelectedPresetId(saved.id)
+      setSuccessMessage('header 预设已保存')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '保存预设失败'
+      setError(message)
+    }
+  }
 
   const handleCreateTask = async () => {
     setLoading(true)
@@ -197,6 +259,103 @@ function App() {
                           setDownloadForm((current) => ({ ...current, url: event.target.value }))
                         }
                       />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        select
+                        fullWidth
+                        label="header 预设"
+                        value={selectedPresetId}
+                        onChange={(event) => applyPreset(event.target.value)}
+                      >
+                        <MenuItem value="">不使用预设</MenuItem>
+                        {headerPresets.map((preset) => (
+                          <MenuItem key={preset.id} value={preset.id}>
+                            {preset.name} ({preset.host})
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="预设 host"
+                        value={presetHost}
+                        placeholder="如: surrit.com"
+                        onChange={(event) => setPresetHost(event.target.value)}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 8 }}>
+                      <TextField
+                        fullWidth
+                        label="预设名称"
+                        value={presetName}
+                        placeholder="如: missav"
+                        onChange={(event) => setPresetName(event.target.value)}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 4 }}>
+                      <Button fullWidth variant="outlined" sx={{ height: '100%' }} onClick={handleSavePreset}>
+                        保存为预设
+                      </Button>
+                    </Grid>
+                    <Grid size={{ xs: 12 }}>
+                      <Typography variant="subtitle2">自定义 headers</Typography>
+                    </Grid>
+                    {downloadHeaders.map((entry) => (
+                      <Grid key={entry.id} size={{ xs: 12 }}>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                          <TextField
+                            fullWidth
+                            label="Header Key"
+                            value={entry.key}
+                            onChange={(event) =>
+                              setDownloadHeaders((current) =>
+                                current.map((item) =>
+                                  item.id === entry.id ? { ...item, key: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                          <TextField
+                            fullWidth
+                            label="Header Value"
+                            value={entry.value}
+                            onChange={(event) =>
+                              setDownloadHeaders((current) =>
+                                current.map((item) =>
+                                  item.id === entry.id ? { ...item, value: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                          <Button
+                            color="error"
+                            onClick={() =>
+                              setDownloadHeaders((current) =>
+                                current.length > 1
+                                  ? current.filter((item) => item.id !== entry.id)
+                                  : [{ id: crypto.randomUUID(), key: '', value: '' }],
+                              )
+                            }
+                          >
+                            删除
+                          </Button>
+                        </Stack>
+                      </Grid>
+                    ))}
+                    <Grid size={{ xs: 12 }}>
+                      <Button
+                        variant="text"
+                        onClick={() =>
+                          setDownloadHeaders((current) => [
+                            ...current,
+                            { id: crypto.randomUUID(), key: '', value: '' },
+                          ])
+                        }
+                      >
+                        添加 Header
+                      </Button>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <TextField
@@ -618,6 +777,9 @@ function buildCommandPreview(payload: TaskPayload) {
       if (payload.download_dir !== 'download') {
         parts.push(`--download_dir=${payload.download_dir}`)
       }
+      Object.entries(payload.headers).forEach(([key, value]) => {
+        parts.push(`--header ${key}:${value}`)
+      })
       return parts.join(' ')
     }
     case 'combine': {
@@ -699,3 +861,28 @@ function formatTimestamp(timestamp: number | null) {
 }
 
 export default App
+
+function toHeaderEntries(entries: Array<{ key: string; value: string }>) {
+  return entries
+    .map((entry) => ({
+      key: entry.key.trim(),
+      value: entry.value.trim(),
+    }))
+    .filter((entry) => entry.key && entry.value)
+}
+
+function toHeaderMap(entries: Array<{ key: string; value: string }>) {
+  const headers: Record<string, string> = {}
+  toHeaderEntries(entries).forEach((entry) => {
+    headers[entry.key] = entry.value
+  })
+  return headers
+}
+
+function getHostFromUrl(url: string) {
+  try {
+    return new URL(url).host.toLowerCase()
+  } catch {
+    return ''
+  }
+}

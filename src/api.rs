@@ -1,16 +1,22 @@
 use crate::cmd::cmd::{check_base_info_exists, clear_temp_files, cut, download as ffmpeg_download};
 use crate::combine::parse::{combine_video, get_reg_file_name, get_reg_files, to_files};
 use crate::common::now;
+use crate::download::BaseInfo;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use tokio::sync::{RwLock, Semaphore};
 use url::Url;
+
+const DOWNLOAD_DIR: &str = "download";
+const HEADER_PRESET_FILE: &str = "header_presets.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,6 +37,8 @@ pub enum TaskPayload {
         folder: String,
         concurrent: i32,
         download_dir: String,
+        #[serde(default)]
+        headers: HashMap<String, String>,
     },
     Combine {
         reg_name: String,
@@ -72,19 +80,50 @@ pub struct CreateTaskRequest {
     pub payload: TaskPayload,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderPreset {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub headers: HashMap<String, String>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HeaderEntry {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateHeaderPresetRequest {
+    pub name: String,
+    pub host: String,
+    pub headers: Vec<HeaderEntry>,
+}
+
 #[derive(Clone)]
 struct AppState {
     tasks: Arc<RwLock<HashMap<u64, TaskRecord>>>,
     next_id: Arc<AtomicU64>,
     executor: Arc<Semaphore>,
+    header_presets: Arc<RwLock<Vec<HeaderPreset>>>,
 }
 
 impl AppState {
     fn new() -> Self {
+        let tasks = load_download_tasks();
+        let next_id = tasks
+            .keys()
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(1);
         Self {
-            tasks: Arc::new(RwLock::new(HashMap::new())),
-            next_id: Arc::new(AtomicU64::new(1)),
+            tasks: Arc::new(RwLock::new(tasks)),
+            next_id: Arc::new(AtomicU64::new(next_id)),
             executor: Arc::new(Semaphore::new(1)),
+            header_presets: Arc::new(RwLock::new(load_header_presets())),
         }
     }
 }
@@ -106,6 +145,8 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks", web::get().to(list_tasks))
             .route("/api/tasks/{id}", web::get().to(get_task))
             .route("/api/tasks", web::post().to(create_task))
+            .route("/api/header-presets", web::get().to(list_header_presets))
+            .route("/api/header-presets", web::post().to(create_header_preset))
     })
     .bind(("127.0.0.1", port))?
     .run()
@@ -196,6 +237,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             folder,
             concurrent,
             download_dir,
+            headers,
         } => {
             run_download_task(
                 url,
@@ -204,6 +246,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
                 folder,
                 concurrent,
                 download_dir,
+                headers,
             )
             .await
         }
@@ -276,6 +319,7 @@ async fn run_download_task(
     folder: String,
     concurrent: i32,
     download_dir: String,
+    headers: HashMap<String, String>,
 ) -> Result<TaskOutcome, String> {
     let current_dir = env::current_dir().map_err(|error| error.to_string())?;
     ensure_directory_exists(current_dir.join(&download_dir)).map_err(|error| error.to_string())?;
@@ -296,9 +340,10 @@ async fn run_download_task(
         ffmpeg_download(url, full_file).map_err(|_| "ffmpeg 下载失败".to_string())?
     } else {
         env::set_current_dir(Path::new(&relative_folder)).map_err(|error| error.to_string())?;
-        let download_result = fast_download(url, output_name.clone(), folder, concurrent)
-            .await
-            .map_err(|_| "下载失败".to_string());
+        let download_result =
+            fast_download(url, output_name.clone(), folder, concurrent, headers)
+                .await
+                .map_err(|_| "下载失败".to_string());
         env::set_current_dir(&current_dir).map_err(|error| error.to_string())?;
         let success = download_result?;
         if success {
@@ -439,6 +484,213 @@ fn default_title(payload: &TaskPayload) -> String {
     }
 }
 
+async fn list_header_presets(state: web::Data<AppState>) -> impl Responder {
+    let mut presets = state.header_presets.read().await.clone();
+    presets.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    HttpResponse::Ok().json(presets)
+}
+
+async fn create_header_preset(
+    state: web::Data<AppState>,
+    request: web::Json<CreateHeaderPresetRequest>,
+) -> impl Responder {
+    let name = request.name.trim();
+    let host = request.host.trim().to_lowercase();
+    if name.is_empty() || host.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "name 和 host 不能为空",
+        }));
+    }
+
+    let headers = normalize_header_entries(&request.headers);
+    if headers.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "至少需要一个有效 header",
+        }));
+    }
+
+    let mut presets = state.header_presets.write().await;
+    let timestamp = now();
+    if let Some(index) = presets.iter().position(|preset| preset.host == host) {
+        presets[index].name = name.to_string();
+        presets[index].headers = headers.clone();
+        presets[index].updated_at = timestamp;
+        let preset = presets[index].clone();
+        if let Err(error) = save_header_presets(&presets) {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": error.to_string(),
+            }));
+        }
+        return HttpResponse::Ok().json(preset);
+    }
+
+    let preset = HeaderPreset {
+        id: format!("{:x}", md5::compute(format!("{}-{}-{}", host, name, timestamp))),
+        name: name.to_string(),
+        host,
+        headers,
+        created_at: timestamp,
+        updated_at: timestamp,
+    };
+    presets.push(preset.clone());
+    if let Err(error) = save_header_presets(&presets) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": error.to_string(),
+        }));
+    }
+
+    HttpResponse::Ok().json(preset)
+}
+
+fn normalize_header_entries(entries: &[HeaderEntry]) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    for entry in entries {
+        let key = entry.key.trim();
+        let value = entry.value.trim();
+        if !key.is_empty() && !value.is_empty() {
+            headers.insert(key.to_string(), value.to_string());
+        }
+    }
+    headers
+}
+
+fn load_download_tasks() -> HashMap<u64, TaskRecord> {
+    let mut tasks = HashMap::new();
+    let Ok(current_dir) = env::current_dir() else {
+        return tasks;
+    };
+    let download_root = current_dir.join(DOWNLOAD_DIR);
+    let Ok(entries) = fs::read_dir(&download_root) else {
+        return tasks;
+    };
+
+    let mut folders = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() { Some(path) } else { None }
+        })
+        .collect::<Vec<_>>();
+    folders.sort();
+
+    let mut id = 1u64;
+    for folder_path in folders {
+        let folder_name = folder_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if folder_name.is_empty() {
+            continue;
+        }
+
+        let created_at = folder_timestamp(&folder_path);
+        let base_info = read_folder_base_info(&folder_path);
+        let url = base_info
+            .as_ref()
+            .map(|value| value.url.clone())
+            .unwrap_or_default();
+        let headers = base_info
+            .as_ref()
+            .map(|value| value.header.clone())
+            .unwrap_or_default();
+        let result_path = detect_video_file(&folder_path).map(|value| value.display().to_string());
+        let (status, message) = if result_path.is_some() {
+            (TaskStatus::Success, "任务已从本地目录恢复".to_string())
+        } else {
+            (
+                TaskStatus::Failed,
+                "目录已恢复，但未检测到最终视频文件".to_string(),
+            )
+        };
+
+        let payload = TaskPayload::Download {
+            url: url.clone(),
+            ffmpeg_download: false,
+            target_file_name: result_path
+                .as_ref()
+                .and_then(|value| {
+                    Path::new(value)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                })
+                .unwrap_or_default(),
+            folder: folder_name,
+            concurrent: 10,
+            download_dir: DOWNLOAD_DIR.to_string(),
+            headers,
+        };
+
+        tasks.insert(
+            id,
+            TaskRecord {
+                id,
+                title: "下载任务".to_string(),
+                status,
+                created_at,
+                started_at: Some(created_at),
+                finished_at: Some(created_at),
+                command_preview: build_command_preview(&payload),
+                message: Some(message),
+                result_path,
+                payload,
+            },
+        );
+        id += 1;
+    }
+
+    tasks
+}
+
+fn read_folder_base_info(folder_path: &Path) -> Option<BaseInfo> {
+    let file = folder_path.join("base_info.json");
+    let content = fs::read_to_string(file).ok()?;
+    serde_json::from_str::<BaseInfo>(&content).ok()
+}
+
+fn folder_timestamp(path: &Path) -> u64 {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or_else(now)
+}
+
+fn detect_video_file(folder_path: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(folder_path).ok()?;
+    let mut files = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(|ext| {
+                        matches!(
+                            ext.to_lowercase().as_str(),
+                            "mp4" | "mkv" | "mov" | "flv" | "avi" | "m4v" | "webm"
+                        )
+                    })
+                    .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files.pop()
+}
+
+fn load_header_presets() -> Vec<HeaderPreset> {
+    let Ok(content) = fs::read_to_string(HEADER_PRESET_FILE) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn save_header_presets(presets: &[HeaderPreset]) -> std::io::Result<()> {
+    let data = serde_json::to_string_pretty(presets)?;
+    fs::write(HEADER_PRESET_FILE, data)
+}
+
 fn build_command_preview(payload: &TaskPayload) -> String {
     match payload {
         TaskPayload::Download {
@@ -448,6 +700,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             folder,
             concurrent,
             download_dir,
+            headers,
         } => {
             let mut parts = vec!["media-tool-rs download".to_string()];
             if !url.trim().is_empty() {
@@ -467,6 +720,9 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             }
             if download_dir != "download" {
                 parts.push(format!("--download_dir={}", download_dir));
+            }
+            for (key, value) in headers {
+                parts.push(format!("--header {}:{}", key, value));
             }
             parts.join(" ")
         }

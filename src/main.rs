@@ -13,6 +13,7 @@ use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use clap::{Args as clapArgs, Parser, Subcommand};
 use md5;
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -267,6 +268,7 @@ impl DownloadArgs {
                         file_name,
                         self.folder.clone(),
                         self.concurrent,
+                        HashMap::new(),
                     )
                     .await
                     .expect("下载失败");
