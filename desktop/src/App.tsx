@@ -334,7 +334,7 @@ function App() {
   const handleRetry = async (taskId: number) => {
     try {
       const task = await retryTask(taskId)
-      setTasks((current) => [task, ...current])
+      setTasks((current) => [task, ...current.filter((t) => t.id !== taskId)])
       setSuccessMessage('已重新创建任务')
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : '重试失败'
@@ -444,6 +444,19 @@ function App() {
 
   const createTitle = activeTab === 'watch' ? '新建任务' : `新建${tabLabelMap[activeTab]}任务`
   const commandPreview = buildCommandPreview(currentPayload)
+  const baseInfoCommandPreview = useMemo(() => {
+    const payload: DownloadPayload = {
+      kind: 'download',
+      url: baseInfoForm.url,
+      ffmpeg_download: baseInfoForm.ffmpeg_download,
+      target_file_name: baseInfoForm.target_file_name,
+      folder: baseInfoForm.folder,
+      concurrent: baseInfoForm.concurrent,
+      download_dir: baseInfoForm.download_dir,
+      headers: baseInfoForm.header,
+    }
+    return buildCommandPreview(payload)
+  }, [baseInfoForm])
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
@@ -457,7 +470,6 @@ function App() {
               media-tool-rs
             </Typography>
           </Stack>
-          <Chip label="iOS / Android / macOS / Windows" color="primary" variant="outlined" />
         </Toolbar>
       </AppBar>
 
@@ -619,7 +631,7 @@ function App() {
                               />
                             </Stack>
                             <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                              {task.command_preview}
+                              {getTaskFileName(task)}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
                               {task.message ?? '等待结果'}
@@ -915,6 +927,12 @@ function App() {
               multiline
               minRows={6}
             />
+            <Typography variant="subtitle2" gutterBottom>
+              命令预览
+            </Typography>
+            <Paper variant="outlined" sx={{ p: 1.5, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+              {baseInfoCommandPreview}
+            </Paper>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -1035,6 +1053,18 @@ function formatHeaderCommandValue(headers: Record<string, string>) {
 
 function shellDoubleQuote(value: string) {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+}
+
+function getTaskFileName(task: TaskRecord): string {
+  const { payload } = task
+  switch (payload.kind) {
+    case 'download':
+      return payload.target_file_name || payload.folder || task.title
+    case 'combine':
+      return payload.target_file_name || task.title
+    case 'cut':
+      return payload.target_file_name || payload.input || task.title
+  }
 }
 
 export default App
