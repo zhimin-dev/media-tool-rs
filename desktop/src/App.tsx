@@ -149,9 +149,49 @@ function App() {
       return combineForm
     }
     return cutForm
-  }, [combineForm, cutForm, downloadForm, tab])
+  }, [combineForm, cutForm, downloadForm, downloadHeaders, tab])
 
   const commandPreview = useMemo(() => buildCommandPreview(currentPayload), [currentPayload])
+
+  const applyPreset = (presetId: string) => {
+    setSelectedPresetId(presetId)
+    const preset = headerPresets.find((item) => item.id === presetId)
+    if (!preset) {
+      setDownloadHeaders([{ id: crypto.randomUUID(), key: '', value: '' }])
+      return
+    }
+    setDownloadHeaders(
+      Object.entries(preset.headers).map(([key, value]) => ({
+        id: crypto.randomUUID(),
+        key,
+        value,
+      })),
+    )
+  }
+
+  const handleSavePreset = async () => {
+    const headers = toHeaderEntries(downloadHeaders)
+    const host = presetHost.trim() || getHostFromUrl(downloadForm.url)
+    if (!presetName.trim() || !host || headers.length === 0) {
+      setError('请填写预设名称、host，并至少添加一个 header')
+      return
+    }
+    try {
+      const saved = await createHeaderPreset({
+        name: presetName.trim(),
+        host,
+        headers,
+      })
+      const records = await fetchHeaderPresets()
+      setHeaderPresets(records)
+      setSelectedPresetId(saved.id)
+      setSuccessMessage('header 预设已保存')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '保存预设失败'
+      setError(message)
+    }
+  }
 
   const handleCreateTask = async () => {
     setLoading(true)
@@ -172,46 +212,6 @@ function App() {
       setError(message)
     } finally {
       setLoading(false)
-    }
-
-    const applyPreset = (presetId: string) => {
-      setSelectedPresetId(presetId)
-      const preset = headerPresets.find((item) => item.id === presetId)
-      if (!preset) {
-        setDownloadHeaders([{ id: crypto.randomUUID(), key: '', value: '' }])
-        return
-      }
-      setDownloadHeaders(
-        Object.entries(preset.headers).map(([key, value]) => ({
-          id: crypto.randomUUID(),
-          key,
-          value,
-        })),
-      )
-    }
-
-    const handleSavePreset = async () => {
-      const headers = toHeaderEntries(downloadHeaders)
-      const host = presetHost.trim() || getHostFromUrl(downloadForm.url)
-      if (!presetName.trim() || !host || headers.length === 0) {
-        setError('请填写预设名称、host，并至少添加一个 header')
-        return
-      }
-      try {
-        const saved = await createHeaderPreset({
-          name: presetName.trim(),
-          host,
-          headers,
-        })
-        const records = await fetchHeaderPresets()
-        setHeaderPresets(records)
-        setSelectedPresetId(saved.id)
-        setSuccessMessage('header 预设已保存')
-        setError('')
-      } catch (requestError) {
-        const message = requestError instanceof Error ? requestError.message : '保存预设失败'
-        setError(message)
-      }
     }
   }
 
@@ -302,7 +302,7 @@ function App() {
                     <Grid size={{ xs: 12 }}>
                       <Typography variant="subtitle2">自定义 headers</Typography>
                     </Grid>
-                    {downloadHeaders.map((entry, index) => (
+                    {downloadHeaders.map((entry) => (
                       <Grid key={entry.id} size={{ xs: 12 }}>
                         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                           <TextField
