@@ -54,6 +54,12 @@ pub struct BaseInfo {
     pub download_dir: String,
     #[serde(default)]
     pub ffmpeg_download: bool,
+    #[serde(default = "default_auto_clear_temp_files")]
+    pub auto_clear_temp_files: bool,
+}
+
+fn default_auto_clear_temp_files() -> bool {
+    true
 }
 
 impl BaseInfo {
@@ -67,6 +73,7 @@ impl BaseInfo {
             concurrent: 10,
             download_dir: "static/download".to_string(),
             ffmpeg_download: false,
+            auto_clear_temp_files: true,
         }
     }
     pub fn set_host(&mut self, url: String) {
@@ -99,6 +106,10 @@ impl BaseInfo {
 
     pub fn set_ffmpeg_download(&mut self, ffmpeg_download: bool) {
         self.ffmpeg_download = ffmpeg_download
+    }
+
+    pub fn set_auto_clear_temp_files(&mut self, auto_clear_temp_files: bool) {
+        self.auto_clear_temp_files = auto_clear_temp_files
     }
 
     pub fn generate(self, folder: String) -> Result<(), Error> {
@@ -150,6 +161,7 @@ pub mod download {
         pass_headers: HashMap<String, String>,
         download_dir: String,
         ffmpeg_download: bool,
+        auto_clear_temp_files: bool,
     ) -> Result<bool, Error> {
         let mut hls_m3u;
         let mut url = pass_url;
@@ -180,6 +192,7 @@ pub mod download {
         base_info_obj.set_concurrent(concurrent);
         base_info_obj.set_download_dir(download_dir);
         base_info_obj.set_ffmpeg_download(ffmpeg_download);
+        base_info_obj.set_auto_clear_temp_files(auto_clear_temp_files);
         let _ = base_info_obj.generate(base_info.to_string());
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");

@@ -57,6 +57,8 @@ pub enum TaskPayload {
     Download {
         url: String,
         ffmpeg_download: bool,
+        #[serde(default = "default_auto_clear_temp_files")]
+        auto_clear_temp_files: bool,
         target_file_name: String,
         folder: String,
         concurrent: i32,
@@ -129,6 +131,12 @@ pub struct UpdateTaskBaseInfoRequest {
     pub download_dir: String,
     #[serde(default)]
     pub ffmpeg_download: bool,
+    #[serde(default = "default_auto_clear_temp_files")]
+    pub auto_clear_temp_files: bool,
+}
+
+fn default_auto_clear_temp_files() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -506,6 +514,7 @@ async fn update_task_base_info(
         concurrent,
         download_dir: download_dir.clone(),
         ffmpeg_download: request.ffmpeg_download,
+        auto_clear_temp_files: request.auto_clear_temp_files,
     };
 
     let current_dir = match env::current_dir() {
@@ -532,6 +541,7 @@ async fn update_task_base_info(
         record.payload = TaskPayload::Download {
             url: base_info.url.clone(),
             ffmpeg_download: base_info.ffmpeg_download,
+            auto_clear_temp_files: base_info.auto_clear_temp_files,
             target_file_name: base_info.target_file_name.clone(),
             folder: base_info.folder.clone(),
             concurrent: base_info.concurrent,
@@ -689,6 +699,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
         TaskPayload::Download {
             url,
             ffmpeg_download,
+            auto_clear_temp_files,
             target_file_name,
             folder,
             concurrent,
@@ -698,6 +709,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             run_download_task(
                 url,
                 ffmpeg_download,
+                auto_clear_temp_files,
                 target_file_name,
                 folder,
                 concurrent,
@@ -794,6 +806,7 @@ fn build_task_record(id: u64, title: Option<String>, payload: TaskPayload) -> Ta
 async fn run_download_task(
     url: String,
     ffmpeg_download_mode: bool,
+    auto_clear_temp_files: bool,
     target_file_name: String,
     folder: String,
     concurrent: i32,
@@ -823,6 +836,7 @@ async fn run_download_task(
         concurrent,
         download_dir: download_dir.clone(),
         ffmpeg_download: ffmpeg_download_mode,
+        auto_clear_temp_files,
     };
     write_base_info(
         &current_dir.join(relative_folder.trim_start_matches("./")),
@@ -843,12 +857,13 @@ async fn run_download_task(
             normalize_headers(headers),
             download_dir.clone(),
             ffmpeg_download_mode,
+            auto_clear_temp_files,
         )
         .await
         .map_err(|_| "下载失败".to_string());
         env::set_current_dir(&current_dir).map_err(|error| error.to_string())?;
         let success = download_result?;
-        if success {
+        if success && auto_clear_temp_files {
             let _ = clear_temp_files(relative_folder.clone());
         }
         success
@@ -1046,6 +1061,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
         TaskPayload::Download {
             url,
             ffmpeg_download,
+            auto_clear_temp_files,
             target_file_name,
             folder,
             concurrent,
@@ -1058,6 +1074,9 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             }
             if *ffmpeg_download {
                 parts.push("--ffmpeg_download".to_string());
+            }
+            if !*auto_clear_temp_files {
+                parts.push("--auto_clear_temp_files=false".to_string());
             }
             if !target_file_name.trim().is_empty() {
                 parts.push(format!(
@@ -1234,6 +1253,7 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
             concurrent: 10,
             download_dir: "static/download".to_string(),
             ffmpeg_download: false,
+            auto_clear_temp_files: true,
         });
         let result_path = detect_result_video(&folder_path);
         let timestamp = folder_path
@@ -1246,6 +1266,7 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
         let payload = TaskPayload::Download {
             url: base_info.url.clone(),
             ffmpeg_download: base_info.ffmpeg_download,
+            auto_clear_temp_files: base_info.auto_clear_temp_files,
             target_file_name: if !base_info.target_file_name.trim().is_empty() {
                 base_info.target_file_name.clone()
             } else {
@@ -1446,6 +1467,7 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
             download_dir,
             url,
             ffmpeg_download,
+            auto_clear_temp_files,
             target_file_name,
             concurrent,
             headers,
@@ -1459,6 +1481,7 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
                         info.url
                     },
                     ffmpeg_download: info.ffmpeg_download || ffmpeg_download,
+                    auto_clear_temp_files: info.auto_clear_temp_files,
                     target_file_name: if info.target_file_name.trim().is_empty() {
                         target_file_name
                     } else {
@@ -1485,6 +1508,7 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
                 TaskPayload::Download {
                     url,
                     ffmpeg_download,
+                    auto_clear_temp_files,
                     target_file_name,
                     folder,
                     concurrent,
