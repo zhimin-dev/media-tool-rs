@@ -13,6 +13,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { createTask, uploadVideo } from '../api'
 
+type Segment = { start: number; end: number; fileName: string }
+
 function CutCreatePage() {
   const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -24,7 +26,7 @@ function CutCreatePage() {
   const [currentTime, setCurrentTime] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [endTime, setEndTime] = useState<number | null>(null)
-  const [segments, setSegments] = useState<Array<{ start: number; end: number }>>([])
+  const [segments, setSegments] = useState<Segment[]>([])
   const [targetFileName, setTargetFileName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -91,6 +93,7 @@ function CutCreatePage() {
 
   const canCreate = inputPath.trim() !== '' && segments.length > 0
   const safeVideoUrl = isSafeBlobUrl(videoUrl) ? videoUrl : undefined
+  const showSegmentInputs = inputPath.trim() !== ''
 
   const handleAddSegment = () => {
     if (startTime === null || endTime === null) {
@@ -102,9 +105,13 @@ function CutCreatePage() {
       return
     }
     setError('')
-    setSegments((current) => [...current, { start: startTime, end: endTime }])
+    setSegments((current) => [...current, { start: startTime, end: endTime, fileName: targetFileName.trim() }])
     setStartTime(null)
     setEndTime(null)
+  }
+
+  const handleSegmentFileNameChange = (index: number, value: string) => {
+    setSegments((current) => current.map((seg, i) => (i === index ? { ...seg, fileName: value } : seg)))
   }
 
   const handleCreate = async () => {
@@ -115,16 +122,17 @@ function CutCreatePage() {
       for (let index = 0; index < segments.length; index += 1) {
         const segment = segments[index]
         const duration = segment.end - segment.start
+        const resolvedFileName = segment.fileName.trim() ||
+          (segments.length > 1 && targetFileName.trim()
+            ? `${targetFileName.trim()}_part${index + 1}`
+            : targetFileName)
         await createTask({
           payload: {
             kind: 'cut',
             input: inputPath.trim(),
             start: segment.start,
             duration,
-            target_file_name:
-              segments.length > 1 && targetFileName.trim()
-                ? `${targetFileName.trim()}_part${index + 1}`
-                : targetFileName,
+            target_file_name: resolvedFileName,
           },
         })
       }
@@ -169,53 +177,93 @@ function CutCreatePage() {
           </Box>
         ) : null}
 
-        {videoDuration > 0 ? (
+        {showSegmentInputs ? (
           <Stack spacing={1}>
-            <Typography variant="body2">
-              当前时间：{currentTime}s &nbsp;/&nbsp; 总时长：{videoDuration}s
-            </Typography>
-            <Slider
-              min={0}
-              max={videoDuration}
-              value={currentTime}
-              step={1}
-              onChange={handleSliderChange}
-              valueLabelDisplay="auto"
-              valueLabelFormat={(v) => `${String(v)}s`}
-            />
-            <Stack direction="row" spacing={1}>
-              <Button variant="outlined" size="small" onClick={() => setStartTime(currentTime)}>
-                标记开始（{currentTime}s）
-              </Button>
-              <Button variant="outlined" size="small" onClick={() => setEndTime(currentTime)}>
-                标记结束（{currentTime}s）
-              </Button>
-              <Button variant="contained" size="small" onClick={handleAddSegment}>
+            {videoDuration > 0 ? (
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  当前时间：{currentTime}s &nbsp;/&nbsp; 总时长：{videoDuration}s
+                </Typography>
+                <Slider
+                  min={0}
+                  max={videoDuration}
+                  value={currentTime}
+                  step={1}
+                  onChange={handleSliderChange}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(v) => `${String(v)}s`}
+                />
+                <Stack direction="row" spacing={1}>
+                  <Button variant="outlined" size="small" onClick={() => setStartTime(currentTime)}>
+                    标记开始（{currentTime}s）
+                  </Button>
+                  <Button variant="outlined" size="small" onClick={() => setEndTime(currentTime)}>
+                    标记结束（{currentTime}s）
+                  </Button>
+                </Stack>
+              </Stack>
+            ) : null}
+
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+              <TextField
+                label="开始时间（秒）"
+                type="number"
+                size="small"
+                value={startTime ?? ''}
+                sx={{ width: 160 }}
+                slotProps={{ htmlInput: { min: 0 } }}
+                onChange={(event) =>
+                  setStartTime(event.target.value === '' ? null : Math.max(0, Number(event.target.value)))
+                }
+              />
+              <TextField
+                label="结束时间（秒）"
+                type="number"
+                size="small"
+                value={endTime ?? ''}
+                sx={{ width: 160 }}
+                slotProps={{ htmlInput: { min: 0 } }}
+                onChange={(event) =>
+                  setEndTime(event.target.value === '' ? null : Math.max(0, Number(event.target.value)))
+                }
+              />
+              <Button variant="contained" size="small" onClick={handleAddSegment} sx={{ mt: 0.5 }}>
                 添加片段
               </Button>
             </Stack>
-            <Stack direction="row" spacing={2}>
-              {startTime !== null ? (
-                <Typography variant="body2">开始：{startTime}s</Typography>
-              ) : null}
-              {endTime !== null ? (
-                <Typography variant="body2">结束：{endTime}s</Typography>
-              ) : null}
-              {startTime !== null && endTime !== null && endTime > startTime ? (
-                <Typography variant="body2">截取时长：{endTime - startTime}s</Typography>
-              ) : null}
-            </Stack>
+
+            {startTime !== null && endTime !== null && endTime > startTime ? (
+              <Typography variant="body2">截取时长：{endTime - startTime}s</Typography>
+            ) : null}
             {endTime !== null && startTime !== null && endTime <= startTime ? (
               <Alert severity="warning">结束时间必须大于开始时间</Alert>
             ) : null}
+
             {segments.length > 0 ? (
               <Stack spacing={0.5}>
                 <Typography variant="body2">已添加片段（{segments.length}）</Typography>
                 {segments.map((segment, index) => (
-                  <Stack key={`${segment.start}-${segment.end}-${index}`} direction="row" spacing={1}>
-                    <Typography variant="body2">
+                  <Stack
+                    key={`${segment.start}-${segment.end}-${index}`}
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1}
+                    sx={{ alignItems: { sm: 'center' } }}
+                  >
+                    <Typography variant="body2" sx={{ minWidth: 180 }}>
                       {index + 1}. {segment.start}s - {segment.end}s（{segment.end - segment.start}s）
                     </Typography>
+                    <TextField
+                      label="文件名（可选）"
+                      size="small"
+                      value={segment.fileName}
+                      sx={{ width: 200 }}
+                      slotProps={{
+                        input: {
+                          endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
+                        },
+                      }}
+                      onChange={(event) => handleSegmentFileNameChange(index, event.target.value)}
+                    />
                     <Button
                       size="small"
                       onClick={() =>
@@ -233,9 +281,9 @@ function CutCreatePage() {
 
         <TextField
           fullWidth
-          label="输出文件名（可选）"
+          label="默认输出文件名（可选）"
           value={targetFileName}
-          helperText="不填则使用随机文件名；填写后会自动补全 .mp4"
+          helperText="不填则使用随机文件名；多片段时作为各片段文件名的默认值"
           slotProps={{
             input: {
               endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,

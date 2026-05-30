@@ -28,6 +28,7 @@ export type TaskListPageProps = {
   onDelete: (taskId: number) => void
   onOpenVideo?: (task: TaskRecord) => void
   onEditFailedTask?: (taskId: number) => void
+  onClearTempFiles?: (taskId: number) => void
 }
 
 function TaskListPage({
@@ -43,6 +44,7 @@ function TaskListPage({
   onDelete,
   onOpenVideo,
   onEditFailedTask,
+  onClearTempFiles,
 }: TaskListPageProps) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -107,7 +109,7 @@ function TaskListPage({
                         打开播放
                       </Button>
                     ) : null}
-                    {(task.payload.kind === 'combine' || task.payload.kind === 'cut') && task.status === 'success' && task.result_path && onOpenVideo ? (
+                    {task.payload.kind === 'combine' && task.status === 'success' && task.result_path && onOpenVideo ? (
                       <Button variant="outlined" size="small" onClick={() => onOpenVideo(task)}>
                         打开播放
                       </Button>
@@ -120,6 +122,11 @@ function TaskListPage({
                         onClick={() => onEditFailedTask(task.id)}
                       >
                         编辑失败任务
+                      </Button>
+                    ) : null}
+                    {task.payload.kind === 'download' && onClearTempFiles ? (
+                      <Button variant="outlined" size="small" onClick={() => onClearTempFiles(task.id)}>
+                        清理临时文件
                       </Button>
                     ) : null}
                     <Button variant="outlined" size="small" onClick={() => onRetry(task.id)}>
