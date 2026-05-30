@@ -215,6 +215,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
                 "/api/header-presets/{host}",
                 web::delete().to(delete_header_preset),
             )
+            .route("/api/tasks/{id}/clear-temp", web::post().to(clear_task_temp_files))
             .route("/api/upload-video", web::post().to(upload_video))
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
@@ -601,6 +602,57 @@ async fn delete_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl R
         }));
     }
     HttpResponse::Ok().json(task)
+}
+
+async fn clear_task_temp_files(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
+    let id = path.into_inner();
+    let task = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&id).cloned()
+    };
+
+    let Some(task) = task else {
+        return HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        }));
+    };
+
+    let Some(folder_path) = resolve_task_directory(&task) else {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "该任务不支持清理临时文件",
+        }));
+    };
+
+    if !folder_path.is_dir() {
+        return HttpResponse::Ok().json(serde_json::json!({ "message": "目录不存在，无需清理" }));
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        const TEMP_EXTENSIONS: [&str; 3] = ["ts", "m3u8", "txt"];
+        let entries = match fs::read_dir(&folder_path) {
+            Ok(entries) => entries,
+            Err(error) => return Err(error.to_string()),
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let entry_path = entry.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+            if let Some(ext) = entry_path.extension().and_then(|ext| ext.to_str()) {
+                if TEMP_EXTENSIONS.contains(&ext) {
+                    let _ = fs::remove_file(&entry_path);
+                }
+            }
+        }
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => HttpResponse::Ok().json(serde_json::json!({ "message": "临时文件已清理" })),
+        Ok(Err(message)) => HttpResponse::InternalServerError().json(serde_json::json!({ "message": message })),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({ "message": error.to_string() })),
+    }
 }
 
 async fn list_header_presets(state: web::Data<AppState>) -> impl Responder {

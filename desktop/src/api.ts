@@ -78,6 +78,13 @@ export async function updateTaskBaseInfo(id: number, payload: BaseInfo): Promise
   return parseResponse<TaskRecord>(response)
 }
 
+export async function clearTaskTempFiles(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/tasks/${id}/clear-temp`, {
+    method: 'POST',
+  })
+  await parseResponse<{ message: string }>(response)
+}
+
 export async function fetchHeaderPresets(): Promise<HeaderPreset[]> {
   const response = await fetch(`${API_BASE}/header-presets`)
   return parseResponse<HeaderPreset[]>(response)

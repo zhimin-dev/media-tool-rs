@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   createTask,
+  clearTaskTempFiles,
   deleteHeaderPreset,
   deleteTask,
   fetchHeaderPresets,
@@ -349,6 +350,17 @@ function App() {
     }
   }
 
+  const handleClearTempFiles = async (taskId: number) => {
+    try {
+      await clearTaskTempFiles(taskId)
+      setSuccessMessage('临时文件已清理')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '清理临时文件失败'
+      setError(message)
+    }
+  }
+
   const handleView = async (taskId: number) => {
     setDetailOpen(true)
     setDetailLoading(true)
@@ -492,6 +504,7 @@ function App() {
                   onDelete={(taskId) => void handleDelete(taskId)}
                   onOpenVideo={handleOpenVideo}
                   onEditFailedTask={(taskId) => void handleOpenBaseInfoEditor(taskId)}
+                  onClearTempFiles={(taskId) => void handleClearTempFiles(taskId)}
                 />
               }
             />
