@@ -11,6 +11,7 @@ export type DownloadPayload = {
 
 export type CombinePayload = {
   kind: 'combine'
+  inputs: string[]
   reg_name: string
   reg_name_start: number
   reg_name_end: number

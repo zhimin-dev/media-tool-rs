@@ -48,6 +48,7 @@ const defaultDownloadForm: DownloadPayload = {
 
 const defaultCombineForm: CombinePayload = {
   kind: 'combine',
+  inputs: [],
   reg_name: '',
   reg_name_start: 1,
   reg_name_end: 1,
@@ -497,7 +498,10 @@ function App() {
                   tasks={combineTasks}
                   refreshInterval={taskRefreshInterval}
                   baseInfoEditLoading={baseInfoEditLoading}
-                  onCreate={() => setCreateDialogOpen(true)}
+                  onCreate={() => {
+                    setCombineForm(defaultCombineForm)
+                    setCreateDialogOpen(true)
+                  }}
                   onRefresh={() => void handleManualRefresh()}
                   onRefreshIntervalChange={setTaskRefreshInterval}
                   onView={(taskId) => void handleView(taskId)}
@@ -641,10 +645,14 @@ function buildCommandPreview(payload: TaskPayload) {
     case 'combine': {
       const parts = [
         'media-tool-rs combine',
-        `-r ${payload.reg_name}`,
-        `--reg-file-start=${payload.reg_name_start}`,
-        `--reg-file-end=${payload.reg_name_end}`,
       ]
+      if (payload.inputs.length > 0) {
+        parts.push(`--inputs=${shellDoubleQuote(payload.inputs.join(','))}`)
+      } else {
+        parts.push(`-r ${payload.reg_name}`)
+        parts.push(`--reg-file-start=${payload.reg_name_start}`)
+        parts.push(`--reg-file-end=${payload.reg_name_end}`)
+      }
       if (payload.target_file_name) {
         parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
       }
@@ -671,10 +679,10 @@ function validatePayload(payload: TaskPayload) {
       }
       return
     case 'combine':
-      if (!payload.reg_name.trim()) {
-        throw new Error('请填写文件正则模式')
+      if (payload.inputs.length === 0 && !payload.reg_name.trim()) {
+        throw new Error('请先选择文件或填写文件正则模式')
       }
-      if (payload.reg_name_end < payload.reg_name_start) {
+      if (payload.inputs.length === 0 && payload.reg_name_end < payload.reg_name_start) {
         throw new Error('结束索引不能小于开始索引')
       }
       return

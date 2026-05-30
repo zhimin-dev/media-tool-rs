@@ -65,6 +65,8 @@ pub enum TaskPayload {
         headers: HashMap<String, String>,
     },
     Combine {
+        #[serde(default)]
+        inputs: Vec<String>,
         reg_name: String,
         reg_name_start: i32,
         reg_name_end: i32,
@@ -224,6 +226,8 @@ struct ServeVideoQuery {
 struct UploadVideoQuery {
     #[serde(default)]
     file_name: String,
+    #[serde(default)]
+    sub_dir: String,
 }
 
 #[derive(Serialize)]
@@ -246,16 +250,31 @@ async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> 
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     };
 
-    let upload_dir = current_dir.join("static").join("uploads");
+    let upload_sub_dir = sanitize_upload_sub_dir(&query.sub_dir);
+    let upload_dir = if upload_sub_dir.is_empty() {
+        current_dir.join("static").join("uploads")
+    } else {
+        current_dir
+            .join("static")
+            .join("uploads")
+            .join(upload_sub_dir)
+    };
     if let Err(error) = ensure_directory_exists(upload_dir.clone()) {
         return HttpResponse::InternalServerError().body(error.to_string());
     }
 
-    let safe_file_name = sanitize_upload_file_name(&query.file_name);
-    let target_name = format!("{}_{}", now(), safe_file_name);
+    let extension = Path::new(&sanitize_upload_file_name(&query.file_name))
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+        .unwrap_or_else(|| "mp4".to_string());
+    let target_name = format!("{:x}.{}", md5::compute(&body), extension);
     let target_path = upload_dir.join(target_name);
-    if let Err(error) = fs::write(&target_path, body) {
-        return HttpResponse::InternalServerError().body(error.to_string());
+    if !target_path.exists() {
+        if let Err(error) = fs::write(&target_path, body) {
+            return HttpResponse::InternalServerError().body(error.to_string());
+        }
     }
 
     HttpResponse::Ok().json(UploadVideoResponse {
@@ -683,6 +702,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             .await
         }
         TaskPayload::Combine {
+            inputs,
             reg_name,
             reg_name_start,
             reg_name_end,
@@ -695,6 +715,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             set_width,
         } => {
             run_combine_task(
+                inputs,
                 reg_name,
                 reg_name_start,
                 reg_name_end,
@@ -843,6 +864,7 @@ async fn run_download_task(
 }
 
 async fn run_combine_task(
+    inputs: Vec<String>,
     reg_name: String,
     reg_name_start: i32,
     reg_name_end: i32,
@@ -856,8 +878,12 @@ async fn run_combine_task(
 ) -> Result<TaskOutcome, String> {
     tokio::task::spawn_blocking(move || {
         let output_name = get_file_name(target_file_name);
-        let files = get_reg_files(reg_name.clone(), reg_name_start, reg_name_end)
-            .map_err(|_| "解析文件失败".to_string())?;
+        let files = if inputs.is_empty() {
+            get_reg_files(reg_name.clone(), reg_name_start, reg_name_end)
+                .map_err(|_| "解析文件失败".to_string())?
+        } else {
+            inputs
+        };
         let file_name = to_files().map_err(|_| "生成临时文件失败".to_string())?;
         let target = if output_name.trim().is_empty() {
             format!("./{}.mp4", now())
@@ -954,6 +980,28 @@ fn sanitize_upload_file_name(file_name: &str) -> String {
     if name.is_empty() {
         return fallback;
     }
+
+    fn sanitize_upload_sub_dir(sub_dir: &str) -> PathBuf {
+        let mut path = PathBuf::new();
+        for segment in sub_dir.split(['/', '\\']) {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+                continue;
+            }
+            let clean = trimmed
+                .chars()
+                .map(|char| match char {
+                    'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => char,
+                    _ => '_',
+                })
+                .collect::<String>();
+            if clean.is_empty() || clean == "." || clean == ".." {
+                continue;
+            }
+            path.push(clean);
+        }
+        path
+    }
     let clean = name.replace(['/', '\\'], "_");
     if clean.is_empty() {
         fallback
@@ -1029,6 +1077,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             parts.join(" ")
         }
         TaskPayload::Combine {
+            inputs,
             reg_name,
             reg_name_start,
             reg_name_end,
@@ -1042,10 +1091,17 @@ fn build_command_preview(payload: &TaskPayload) -> String {
         } => {
             let mut parts = vec![
                 "media-tool-rs combine".to_string(),
-                format!("-r {}", reg_name),
-                format!("--reg-file-start={}", reg_name_start),
-                format!("--reg-file-end={}", reg_name_end),
             ];
+            if !inputs.is_empty() {
+                parts.push(format!(
+                    "--inputs={}",
+                    shell_double_quote(&inputs.join(","))
+                ));
+            } else {
+                parts.push(format!("-r {}", reg_name));
+                parts.push(format!("--reg-file-start={}", reg_name_start));
+                parts.push(format!("--reg-file-end={}", reg_name_end));
+            }
             if !target_file_name.trim().is_empty() {
                 parts.push(format!(
                     "--target_file_name={}",
