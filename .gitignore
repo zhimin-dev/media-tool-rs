@@ -12,3 +12,5 @@ header_presets.json
 /static/download/
 /static/cut/
 package-lock.json
+*.json
+static/*
