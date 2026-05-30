@@ -65,7 +65,6 @@ function CreateTaskDialog({
               fullWidth
               label="输出文件名"
               value={downloadForm.target_file_name}
-              helperText="可选，不填会使用随机文件名"
               slotProps={{
                 input: {
                   endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
