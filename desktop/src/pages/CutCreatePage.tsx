@@ -24,6 +24,7 @@ function CutCreatePage() {
   const [currentTime, setCurrentTime] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [endTime, setEndTime] = useState<number | null>(null)
+  const [segments, setSegments] = useState<Array<{ start: number; end: number }>>([])
   const [targetFileName, setTargetFileName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -49,6 +50,7 @@ function CutCreatePage() {
     setInputPath('')
     setStartTime(null)
     setEndTime(null)
+    setSegments([])
     setCurrentTime(0)
     setVideoDuration(0)
     setError('')
@@ -87,29 +89,45 @@ function CutCreatePage() {
     setCurrentTime(time)
   }
 
-  const canCreate =
-    inputPath.trim() !== '' &&
-    startTime !== null &&
-    endTime !== null &&
-    endTime > startTime
+  const canCreate = inputPath.trim() !== '' && segments.length > 0
   const safeVideoUrl = isSafeBlobUrl(videoUrl) ? videoUrl : undefined
 
-  const handleCreate = async () => {
-    if (!canCreate || startTime === null || endTime === null) return
+  const handleAddSegment = () => {
+    if (startTime === null || endTime === null) {
+      setError('请先标记开始和结束时间')
+      return
+    }
+    if (endTime <= startTime) {
+      setError('结束时间必须大于开始时间')
+      return
+    }
+    setError('')
+    setSegments((current) => [...current, { start: startTime, end: endTime }])
+    setStartTime(null)
+    setEndTime(null)
+  }
 
-    const duration = endTime - startTime
+  const handleCreate = async () => {
+    if (!canCreate) return
     setLoading(true)
     setError('')
     try {
-      await createTask({
-        payload: {
-          kind: 'cut',
-          input: inputPath.trim(),
-          start: startTime,
-          duration,
-          target_file_name: targetFileName,
-        },
-      })
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index]
+        const duration = segment.end - segment.start
+        await createTask({
+          payload: {
+            kind: 'cut',
+            input: inputPath.trim(),
+            start: segment.start,
+            duration,
+            target_file_name:
+              segments.length > 1 && targetFileName.trim()
+                ? `${targetFileName.trim()}_part${index + 1}`
+                : targetFileName,
+          },
+        })
+      }
       navigate('/cut')
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建任务失败')
@@ -172,6 +190,9 @@ function CutCreatePage() {
               <Button variant="outlined" size="small" onClick={() => setEndTime(currentTime)}>
                 标记结束（{currentTime}s）
               </Button>
+              <Button variant="contained" size="small" onClick={handleAddSegment}>
+                添加片段
+              </Button>
             </Stack>
             <Stack direction="row" spacing={2}>
               {startTime !== null ? (
@@ -186,6 +207,26 @@ function CutCreatePage() {
             </Stack>
             {endTime !== null && startTime !== null && endTime <= startTime ? (
               <Alert severity="warning">结束时间必须大于开始时间</Alert>
+            ) : null}
+            {segments.length > 0 ? (
+              <Stack spacing={0.5}>
+                <Typography variant="body2">已添加片段（{segments.length}）</Typography>
+                {segments.map((segment, index) => (
+                  <Stack key={`${segment.start}-${segment.end}-${index}`} direction="row" spacing={1}>
+                    <Typography variant="body2">
+                      {index + 1}. {segment.start}s - {segment.end}s（{segment.end - segment.start}s）
+                    </Typography>
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        setSegments((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                      }
+                    >
+                      删除
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
             ) : null}
           </Stack>
         ) : null}
