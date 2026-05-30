@@ -4,7 +4,7 @@ use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
 use actix_files::{Files, NamedFile};
-use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -150,6 +150,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
+            .app_data(web::PayloadConfig::new(1024 * 1024 * 1024))
             .route("/api/health", web::get().to(health))
             .route("/api/tasks", web::get().to(list_tasks))
             .route("/api/tasks/{id}", web::get().to(get_task))
@@ -161,6 +162,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/header-presets", web::get().to(list_header_presets))
             .route("/api/header-presets", web::post().to(save_header_preset))
             .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
+            .route("/api/upload-video", web::post().to(upload_video))
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
     })
@@ -179,6 +181,44 @@ async fn health() -> impl Responder {
 #[derive(Deserialize)]
 struct ServeVideoQuery {
     path: String,
+}
+
+#[derive(Deserialize)]
+struct UploadVideoQuery {
+    #[serde(default)]
+    file_name: String,
+}
+
+#[derive(Serialize)]
+struct UploadVideoResponse {
+    path: String,
+}
+
+async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> impl Responder {
+    if body.is_empty() {
+        return HttpResponse::BadRequest().body("empty file");
+    }
+
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    };
+
+    let upload_dir = current_dir.join("static").join("uploads");
+    if let Err(error) = ensure_directory_exists(upload_dir.clone()) {
+        return HttpResponse::InternalServerError().body(error.to_string());
+    }
+
+    let safe_file_name = sanitize_upload_file_name(&query.file_name);
+    let target_name = format!("{}_{}", now(), safe_file_name);
+    let target_path = upload_dir.join(target_name);
+    if let Err(error) = fs::write(&target_path, body) {
+        return HttpResponse::InternalServerError().body(error.to_string());
+    }
+
+    HttpResponse::Ok().json(UploadVideoResponse {
+        path: target_path.display().to_string(),
+    })
 }
 
 async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> HttpResponse {
@@ -737,13 +777,14 @@ async fn run_combine_task(
     set_width: i32,
 ) -> Result<TaskOutcome, String> {
     tokio::task::spawn_blocking(move || {
+        let output_name = get_file_name(target_file_name);
         let files = get_reg_files(reg_name.clone(), reg_name_start, reg_name_end)
             .map_err(|_| "解析文件失败".to_string())?;
         let file_name = to_files().map_err(|_| "生成临时文件失败".to_string())?;
-        let target = if target_file_name.trim().is_empty() {
+        let target = if output_name.trim().is_empty() {
             format!("./{}.mp4", now())
         } else {
-            format!("./{}", target_file_name)
+            format!("./{}", output_name)
         };
 
         let success = combine_video(
@@ -790,10 +831,11 @@ async fn run_cut_task(
         ensure_directory_exists(current_dir.join("static").join("cut"))
             .map_err(|error| error.to_string())?;
 
-        let target = if target_file_name.trim().is_empty() {
+        let output_name = get_file_name(target_file_name);
+        let target = if output_name.trim().is_empty() {
             format!("./static/cut/{}.mp4", now())
         } else {
-            format!("./static/cut/{}", target_file_name)
+            format!("./static/cut/{}", output_name)
         };
 
         let success =
@@ -821,6 +863,24 @@ fn ensure_directory_exists(path: PathBuf) -> std::io::Result<()> {
         std::fs::create_dir_all(path)?;
     }
     Ok(())
+}
+
+fn sanitize_upload_file_name(file_name: &str) -> String {
+    let fallback = "uploaded.mp4".to_string();
+    let name = Path::new(file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() {
+        return fallback;
+    }
+    let clean = name.replace(['/', '\\'], "_");
+    if clean.is_empty() {
+        fallback
+    } else {
+        clean
+    }
 }
 
 fn write_base_info(folder_path: &PathBuf, base_info: &BaseInfo) -> std::io::Result<()> {

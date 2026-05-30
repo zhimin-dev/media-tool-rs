@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Alert,
   Box,
   Button,
+  InputAdornment,
   Paper,
   Slider,
   Stack,
@@ -10,25 +11,31 @@ import {
   Typography,
 } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
-import { createTask } from '../api'
+import { createTask, uploadVideo } from '../api'
 
 function CutCreatePage() {
   const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const objectUrlRef = useRef<string>('')
   const [hasVideo, setHasVideo] = useState(false)
+  const [videoUrl, setVideoUrl] = useState('')
   const [inputPath, setInputPath] = useState('')
   const [videoDuration, setVideoDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [endTime, setEndTime] = useState<number | null>(null)
   const [targetFileName, setTargetFileName] = useState('')
+  const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const uploadSeqRef = useRef(0)
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+    event.target.value = ''
+    const currentUploadSeq = uploadSeqRef.current + 1
+    uploadSeqRef.current = currentUploadSeq
 
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current)
@@ -36,28 +43,29 @@ function CutCreatePage() {
 
     const url = URL.createObjectURL(file)
     objectUrlRef.current = url
+    setVideoUrl(url.startsWith('blob:') ? url : '')
     setHasVideo(true)
-    // Prefer the full local path if the browser exposes it (e.g. Electron),
-    // otherwise fall back to the file name so users can edit it manually.
-    const filePath = (file as File & { path?: string }).path ?? file.name
-    setInputPath(filePath)
+    setUploading(true)
+    setInputPath('')
     setStartTime(null)
     setEndTime(null)
     setCurrentTime(0)
     setVideoDuration(0)
-  }
+    setError('')
 
-  // Set the video src imperatively so the blob URL never flows through JSX attributes.
-  // Only allow blob: protocol URLs (always produced by URL.createObjectURL).
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video || !hasVideo) return
-    const url = objectUrlRef.current
-    // Validate protocol before assigning to prevent any non-blob URL from reaching the DOM
-    if (url.startsWith('blob:')) {
-      video.src = url
+    try {
+      const uploaded = await uploadVideo(file)
+      if (uploadSeqRef.current !== currentUploadSeq) return
+      setInputPath(uploaded.path)
+    } catch (err) {
+      if (uploadSeqRef.current !== currentUploadSeq) return
+      setError(err instanceof Error ? err.message : '上传文件失败')
+    } finally {
+      if (uploadSeqRef.current === currentUploadSeq) {
+        setUploading(false)
+      }
     }
-  }, [hasVideo])
+  }
 
   const handleLoadedMetadata = () => {
     const video = videoRef.current
@@ -84,6 +92,7 @@ function CutCreatePage() {
     startTime !== null &&
     endTime !== null &&
     endTime > startTime
+  const safeVideoUrl = isSafeBlobUrl(videoUrl) ? videoUrl : undefined
 
   const handleCreate = async () => {
     if (!canCreate || startTime === null || endTime === null) return
@@ -117,7 +126,7 @@ function CutCreatePage() {
         {error ? <Alert severity="error">{error}</Alert> : null}
 
         <Button variant="outlined" component="label" sx={{ alignSelf: 'flex-start' }}>
-          选择视频文件
+          {uploading ? '上传中...' : '选择视频文件'}
           <input type="file" accept="video/*" hidden onChange={handleFileSelect} />
         </Button>
 
@@ -125,7 +134,7 @@ function CutCreatePage() {
           fullWidth
           label="输入文件路径"
           value={inputPath}
-          helperText="选择文件后自动填入，也可手动输入完整路径"
+          helperText="选择文件后将先上传到服务器并自动填入真实路径，也可手动输入完整路径"
           onChange={(event) => setInputPath(event.target.value)}
         />
 
@@ -133,6 +142,7 @@ function CutCreatePage() {
           <Box sx={{ backgroundColor: '#000', borderRadius: 2, overflow: 'hidden' }}>
             <video
               ref={videoRef}
+              src={safeVideoUrl}
               controls
               style={{ width: '100%', maxHeight: 400, display: 'block' }}
               onLoadedMetadata={handleLoadedMetadata}
@@ -184,7 +194,12 @@ function CutCreatePage() {
           fullWidth
           label="输出文件名（可选）"
           value={targetFileName}
-          helperText="不填则使用随机文件名"
+          helperText="不填则使用随机文件名；填写后会自动补全 .mp4"
+          slotProps={{
+            input: {
+              endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
+            },
+          }}
           onChange={(event) => setTargetFileName(event.target.value)}
         />
 
@@ -206,3 +221,7 @@ function CutCreatePage() {
 }
 
 export default CutCreatePage
+
+function isSafeBlobUrl(url: string) {
+  return /^blob:[a-z]+:\/\//.test(url)
+}

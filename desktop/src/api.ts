@@ -28,6 +28,18 @@ export async function createTask(request: CreateTaskRequest): Promise<TaskRecord
   return parseResponse<TaskRecord>(response)
 }
 
+export async function uploadVideo(file: File): Promise<{ path: string }> {
+  const fileName = encodeURIComponent(file.name || 'uploaded.mp4')
+  const response = await fetch(`${API_BASE}/upload-video?file_name=${fileName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+    },
+    body: file,
+  })
+  return parseResponse<{ path: string }>(response)
+}
+
 export async function retryTask(id: number): Promise<TaskRecord> {
   const response = await fetch(`${API_BASE}/tasks/${id}/retry`, {
     method: 'POST',

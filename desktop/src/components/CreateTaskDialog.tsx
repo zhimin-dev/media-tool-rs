@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { useState } from 'react'
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
+import { uploadVideo } from '../api'
 import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset } from '../types'
 
 type CreateTaskDialogProps = {
@@ -64,17 +65,29 @@ function CreateTaskDialog({
   const [testedKey, setTestedKey] = useState<string | null>(null)
   const [testPreviewOpen, setTestPreviewOpen] = useState(false)
   const [testFiles, setTestFiles] = useState<string[]>([])
+  const [combineUploadLoading, setCombineUploadLoading] = useState(false)
+  const [combineUploadError, setCombineUploadError] = useState('')
 
   // Derive tested: true only when the snapshot matches the current form values
   const formKey = [combineForm.reg_name, combineForm.reg_name_start, combineForm.reg_name_end].join('|')
   const combineTested = testedKey !== null && testedKey === formKey
 
-  const handleCombineFilePick = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCombineFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
-    const filePath = (file as File & { path?: string }).path ?? file.name
-    const regName = convertPathToRegex(filePath)
-    onCombineFormChange((current) => ({ ...current, reg_name: regName }))
+    event.target.value = ''
+    setCombineUploadLoading(true)
+    setCombineUploadError('')
+    try {
+      const uploaded = await uploadVideo(file)
+      const regName = convertPathToRegex(uploaded.path)
+      onCombineFormChange((current) => ({ ...current, reg_name: regName }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '上传文件失败'
+      setCombineUploadError(message)
+    } finally {
+      setCombineUploadLoading(false)
+    }
   }
 
   const handleCombineTest = () => {
@@ -177,6 +190,7 @@ function CreateTaskDialog({
         ) : null}
         {page === 'combine' ? (
           <Stack spacing={2} sx={{ pt: 1 }}>
+            {combineUploadError ? <Alert severity="error">{combineUploadError}</Alert> : null}
             <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
               <TextField
                 fullWidth
@@ -186,7 +200,7 @@ function CreateTaskDialog({
                 onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value }))}
               />
               <Button variant="outlined" component="label" sx={{ mt: 0.5, whiteSpace: 'nowrap', minWidth: 100 }}>
-                选择文件
+               {combineUploadLoading ? '上传中...' : '选择文件'}
                 <input type="file" accept="video/*" hidden onChange={handleCombineFilePick} />
               </Button>
             </Stack>
@@ -194,9 +208,14 @@ function CreateTaskDialog({
               fullWidth
               label="输出文件名"
               value={combineForm.target_file_name}
-              helperText="可选，如果不填则随机字符串"
+              helperText="可选，不填则随机字符串；填写后会自动补全 .mp4"
+              slotProps={{
+               input: {
+                 endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
+               },
+              }}
               onChange={(event) =>
-                onCombineFormChange((current) => ({ ...current, target_file_name: event.target.value }))
+               onCombineFormChange((current) => ({ ...current, target_file_name: event.target.value }))
               }
             />
             <TextField
