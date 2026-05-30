@@ -19,6 +19,7 @@ import CreateTaskDialog from './components/CreateTaskDialog'
 import TaskDetailDialog from './components/TaskDetailDialog'
 import CombinePage from './pages/CombinePage'
 import CutPage from './pages/CutPage'
+import CutCreatePage from './pages/CutCreatePage'
 import DownloadPage from './pages/DownloadPage'
 import HeaderPresetsPage from './pages/HeaderPresetsPage'
 import WatchPage from './pages/WatchPage'
@@ -360,13 +361,19 @@ function App() {
   }
 
   const handleOpenVideo = (task: TaskRecord) => {
-    if (task.payload.kind !== 'download' || !task.result_path) {
+    if (!task.result_path) {
       setError('未找到视频输出文件')
       return
     }
 
     setError('')
-    const videoUrl = `/static/download/${task.payload.folder}/${task.payload.target_file_name}`
+    let videoUrl: string
+    if (task.payload.kind === 'download') {
+      videoUrl = `/static/download/${task.payload.folder}/${task.payload.target_file_name}`
+    } else {
+      // combine and cut — use the serve-video API with the absolute result path
+      videoUrl = `/api/serve-video?path=${encodeURIComponent(task.result_path)}`
+    }
     setPlayerUrl(videoUrl)
     navigate(getPathForPage('watch'))
   }
@@ -496,6 +503,7 @@ function App() {
                   onView={(taskId) => void handleView(taskId)}
                   onRetry={(taskId) => void handleRetry(taskId)}
                   onDelete={(taskId) => void handleDelete(taskId)}
+                  onOpenVideo={handleOpenVideo}
                 />
               }
             />
@@ -506,15 +514,17 @@ function App() {
                   tasks={cutTasks}
                   refreshInterval={taskRefreshInterval}
                   baseInfoEditLoading={baseInfoEditLoading}
-                  onCreate={() => setCreateDialogOpen(true)}
+                  onCreate={() => navigate('/cut/create')}
                   onRefresh={() => void handleManualRefresh()}
                   onRefreshIntervalChange={setTaskRefreshInterval}
                   onView={(taskId) => void handleView(taskId)}
                   onRetry={(taskId) => void handleRetry(taskId)}
                   onDelete={(taskId) => void handleDelete(taskId)}
+                  onOpenVideo={handleOpenVideo}
                 />
               }
             />
+            <Route path="/cut/create" element={<CutCreatePage />} />
             <Route
               path="/headers"
               element={

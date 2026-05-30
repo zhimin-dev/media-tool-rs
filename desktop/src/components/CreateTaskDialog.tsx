@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
+import { useState } from 'react'
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
 import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset } from '../types'
 
@@ -25,6 +26,20 @@ type CreateTaskDialogProps = {
   onSubmit: () => void
 }
 
+function convertPathToRegex(filePath: string): string {
+  // Replace the last run of digits before the file extension with (.*)
+  // e.g. /path/jepg_1.mp4 → /path/jepg_(.*).mp4
+  return filePath.replace(/\d+(\.[^./\\]+)$/, '(.*)$1')
+}
+
+function generateTestFiles(regName: string, start: number, end: number): string[] {
+  const files: string[] = []
+  for (let i = start; i <= end; i++) {
+    files.push(regName.replace('(.*)', String(i)))
+  }
+  return files
+}
+
 function CreateTaskDialog({
   open,
   page,
@@ -46,6 +61,37 @@ function CreateTaskDialog({
   onManageHeaders,
   onSubmit,
 }: CreateTaskDialogProps) {
+  const [testedKey, setTestedKey] = useState<string | null>(null)
+  const [testPreviewOpen, setTestPreviewOpen] = useState(false)
+  const [testFiles, setTestFiles] = useState<string[]>([])
+
+  // Derive tested: true only when the snapshot matches the current form values
+  const formKey = [combineForm.reg_name, combineForm.reg_name_start, combineForm.reg_name_end].join('|')
+  const combineTested = testedKey !== null && testedKey === formKey
+
+  const handleCombineFilePick = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const filePath = (file as File & { path?: string }).path ?? file.name
+    const regName = convertPathToRegex(filePath)
+    onCombineFormChange((current) => ({ ...current, reg_name: regName }))
+  }
+
+  const handleCombineTest = () => {
+    const files = generateTestFiles(
+      combineForm.reg_name,
+      combineForm.reg_name_start,
+      combineForm.reg_name_end,
+    )
+    setTestFiles(files)
+    setTestPreviewOpen(true)
+  }
+
+  const handleTestConfirm = () => {
+    setTestPreviewOpen(false)
+    setTestedKey(formKey)
+  }
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>{createTitle}</DialogTitle>
@@ -131,13 +177,19 @@ function CreateTaskDialog({
         ) : null}
         {page === 'combine' ? (
           <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              fullWidth
-              label="文件正则模式"
-              value={combineForm.reg_name}
-              helperText="示例：~/file/path/(.*).mp4"
-              onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value }))}
-            />
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+              <TextField
+                fullWidth
+                label="文件正则模式"
+                value={combineForm.reg_name}
+                helperText="示例：~/file/path/jepg_(.*).mp4，选择文件后自动生成，也可手动输入"
+                onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value }))}
+              />
+              <Button variant="outlined" component="label" sx={{ mt: 0.5, whiteSpace: 'nowrap', minWidth: 100 }}>
+                选择文件
+                <input type="file" accept="video/*" hidden onChange={handleCombineFilePick} />
+              </Button>
+            </Stack>
             <TextField
               fullWidth
               label="输出文件名"
@@ -211,10 +263,46 @@ function CreateTaskDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
-        <Button onClick={onSubmit} disabled={loading} variant="contained">
-          {loading ? '提交中...' : '执行'}
-        </Button>
+        {page === 'combine' ? (
+          <>
+            <Button onClick={handleCombineTest} variant="outlined" disabled={!combineForm.reg_name}>
+              测试
+            </Button>
+            {combineTested ? (
+              <Button onClick={onSubmit} disabled={loading} variant="contained">
+                {loading ? '提交中...' : '执行'}
+              </Button>
+            ) : null}
+          </>
+        ) : (
+          <Button onClick={onSubmit} disabled={loading} variant="contained">
+            {loading ? '提交中...' : '执行'}
+          </Button>
+        )}
       </DialogActions>
+
+      {/* Test preview dialog */}
+      <Dialog open={testPreviewOpen} onClose={() => setTestPreviewOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>匹配文件预览</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            根据当前规则将匹配以下文件（共 {testFiles.length} 个）：
+          </Typography>
+          <List dense>
+            {testFiles.map((file, index) => (
+              <ListItem key={index}>
+                <ListItemText primary={file} />
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTestPreviewOpen(false)}>取消</Button>
+          <Button onClick={handleTestConfirm} variant="contained">
+            确认，继续保存
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   )
 }
