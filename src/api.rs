@@ -917,7 +917,7 @@ async fn run_cut_task(
         };
 
         let success =
-            cut(input, start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
+            cut(input.clone(), start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
         if !success {
             return Err("截取视频失败".to_string());
         }
@@ -1246,98 +1246,97 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
         );
         next_id += 1;
     }
-
-    fn task_kind_from_payload(payload: &TaskPayload) -> TaskKind {
-        match payload {
-            TaskPayload::Download { .. } => TaskKind::Download,
-            TaskPayload::Combine { .. } => TaskKind::Combine,
-            TaskPayload::Cut { .. } => TaskKind::Cut,
-        }
-    }
-
-    fn ensure_task_files(task_config_dir: &PathBuf) -> std::io::Result<()> {
-        fs::create_dir_all(task_config_dir)?;
-        for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
-            let file_path = task_config_dir.join(kind.file_name());
-            if !file_path.exists() {
-                fs::write(file_path, "[]")?;
-            }
-        }
-        Ok(())
-    }
-
-    fn load_tasks_from_config(task_config_dir: &PathBuf) -> HashMap<u64, TaskRecord> {
-        let mut tasks = HashMap::new();
-        for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
-            let file_path = task_config_dir.join(kind.file_name());
-            let records = fs::read_to_string(file_path)
-                .ok()
-                .and_then(|content| serde_json::from_str::<Vec<TaskRecord>>(&content).ok())
-                .unwrap_or_default();
-            for record in records {
-                tasks.insert(record.id, record);
-            }
-        }
-        tasks
-    }
-
-    fn write_tasks_to_config(
-        task_config_dir: &PathBuf,
-        tasks: &HashMap<u64, TaskRecord>,
-    ) -> std::io::Result<()> {
-        ensure_task_files(task_config_dir)?;
-        let mut download = Vec::new();
-        let mut combine = Vec::new();
-        let mut cut = Vec::new();
-        for task in tasks.values().cloned() {
-            match task_kind_from_payload(&task.payload) {
-                TaskKind::Download => download.push(task),
-                TaskKind::Combine => combine.push(task),
-                TaskKind::Cut => cut.push(task),
-            }
-        }
-        for records in [&mut download, &mut combine, &mut cut] {
-            records.sort_by(|left, right| right.id.cmp(&left.id));
-        }
-        fs::write(
-            task_config_dir.join(TaskKind::Download.file_name()),
-            serde_json::to_string_pretty(&download)?,
-        )?;
-        fs::write(
-            task_config_dir.join(TaskKind::Combine.file_name()),
-            serde_json::to_string_pretty(&combine)?,
-        )?;
-        fs::write(
-            task_config_dir.join(TaskKind::Cut.file_name()),
-            serde_json::to_string_pretty(&cut)?,
-        )?;
-        Ok(())
-    }
-
-    async fn persist_tasks(state: &web::Data<AppState>) -> Result<(), String> {
-        let tasks = state.tasks.read().await;
-        write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
-    }
-
-    fn remove_uploaded_source_if_needed(current_dir: &Path, input: &str) {
-        let uploads_dir = current_dir.join("static").join("uploads");
-        let Ok(uploads_dir) = fs::canonicalize(uploads_dir) else {
-            return;
-        };
-        let input_path = PathBuf::from(input);
-        if !input_path.is_absolute() {
-            return;
-        }
-        let Ok(canonical_input) = fs::canonicalize(input_path) else {
-            return;
-        };
-        if !canonical_input.starts_with(&uploads_dir) || !canonical_input.is_file() {
-            return;
-        }
-        let _ = fs::remove_file(canonical_input);
-    }
-
     tasks
+}
+
+fn task_kind_from_payload(payload: &TaskPayload) -> TaskKind {
+    match payload {
+        TaskPayload::Download { .. } => TaskKind::Download,
+        TaskPayload::Combine { .. } => TaskKind::Combine,
+        TaskPayload::Cut { .. } => TaskKind::Cut,
+    }
+}
+
+fn ensure_task_files(task_config_dir: &PathBuf) -> std::io::Result<()> {
+    fs::create_dir_all(task_config_dir)?;
+    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+        let file_path = task_config_dir.join(kind.file_name());
+        if !file_path.exists() {
+            fs::write(file_path, "[]")?;
+        }
+    }
+    Ok(())
+}
+
+fn load_tasks_from_config(task_config_dir: &PathBuf) -> HashMap<u64, TaskRecord> {
+    let mut tasks = HashMap::new();
+    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+        let file_path = task_config_dir.join(kind.file_name());
+        let records = fs::read_to_string(file_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<Vec<TaskRecord>>(&content).ok())
+            .unwrap_or_default();
+        for record in records {
+            tasks.insert(record.id, record);
+        }
+    }
+    tasks
+}
+
+fn write_tasks_to_config(
+    task_config_dir: &PathBuf,
+    tasks: &HashMap<u64, TaskRecord>,
+) -> std::io::Result<()> {
+    ensure_task_files(task_config_dir)?;
+    let mut download = Vec::new();
+    let mut combine = Vec::new();
+    let mut cut = Vec::new();
+    for task in tasks.values().cloned() {
+        match task_kind_from_payload(&task.payload) {
+            TaskKind::Download => download.push(task),
+            TaskKind::Combine => combine.push(task),
+            TaskKind::Cut => cut.push(task),
+        }
+    }
+    for records in [&mut download, &mut combine, &mut cut] {
+        records.sort_by(|left, right| right.id.cmp(&left.id));
+    }
+    fs::write(
+        task_config_dir.join(TaskKind::Download.file_name()),
+        serde_json::to_string_pretty(&download)?,
+    )?;
+    fs::write(
+        task_config_dir.join(TaskKind::Combine.file_name()),
+        serde_json::to_string_pretty(&combine)?,
+    )?;
+    fs::write(
+        task_config_dir.join(TaskKind::Cut.file_name()),
+        serde_json::to_string_pretty(&cut)?,
+    )?;
+    Ok(())
+}
+
+async fn persist_tasks(state: &web::Data<AppState>) -> Result<(), String> {
+    let tasks = state.tasks.read().await;
+    write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
+}
+
+fn remove_uploaded_source_if_needed(current_dir: &Path, input: &str) {
+    let uploads_dir = current_dir.join("static").join("uploads");
+    let Ok(uploads_dir) = fs::canonicalize(uploads_dir) else {
+        return;
+    };
+    let input_path = PathBuf::from(input);
+    if !input_path.is_absolute() {
+        return;
+    }
+    let Ok(canonical_input) = fs::canonicalize(input_path) else {
+        return;
+    };
+    if !canonical_input.starts_with(&uploads_dir) || !canonical_input.is_file() {
+        return;
+    }
+    let _ = fs::remove_file(canonical_input);
 }
 
 fn read_task_base_info(folder_path: &PathBuf) -> Option<BaseInfo> {
