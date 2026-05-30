@@ -215,6 +215,10 @@ pub struct DownloadArgs {
     /// 下载请求头，JSON 字符串，如 {"referer":"https://a.com","origin":"https://a.com"}
     #[arg(long = "header", alias = "headers", default_value_t = String::from(""))]
     headers: String,
+
+    /// 是否自动清理中间文件（ts/m3u8/txt）
+    #[arg(long = "auto_clear_temp_files", default_value_t = true)]
+    auto_clear_temp_files: bool,
 }
 
 #[derive(clapArgs)]
@@ -291,6 +295,7 @@ impl DownloadArgs {
                         headers,
                         self.download_dir.clone(),
                         self.ffmpeg_download,
+                        self.auto_clear_temp_files,
                     )
                     .await
                     .expect("下载失败");
@@ -308,11 +313,15 @@ impl DownloadArgs {
         println!("生成mp4文件成功");
         if res {
             env::set_current_dir(current_dir).unwrap();
-            let data = clear_temp_files(folder_name.clone());
-            if data {
-                println!("清理临时文件成功");
+            if self.auto_clear_temp_files {
+                let data = clear_temp_files(folder_name.clone());
+                if data {
+                    println!("清理临时文件成功");
+                } else {
+                    println!("清理临时文件失败");
+                }
             } else {
-                println!("清理临时文件失败");
+                println!("跳过清理临时文件");
             }
         }
     }

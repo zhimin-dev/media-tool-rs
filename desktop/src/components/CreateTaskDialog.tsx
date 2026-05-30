@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { useState } from 'react'
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, FormControlLabel, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, Switch, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
 import { uploadVideo } from '../api'
 import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset } from '../types'
@@ -196,6 +196,20 @@ function CreateTaskDialog({
                 onDownloadFormChange((current) => ({ ...current, concurrent: Number(event.target.value) }))
               }
               slotProps={{ htmlInput: { min: 1 } }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={downloadForm.auto_clear_temp_files}
+                  onChange={(event) =>
+                    onDownloadFormChange((current) => ({
+                      ...current,
+                      auto_clear_temp_files: event.target.checked,
+                    }))
+                  }
+                />
+              }
+              label="自动删除中间文件"
             />
             <Button variant="outlined" onClick={onManageHeaders}>
               前往管理 Header 预设

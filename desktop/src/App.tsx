@@ -39,6 +39,7 @@ const defaultDownloadForm: DownloadPayload = {
   kind: 'download',
   url: '',
   ffmpeg_download: false,
+  auto_clear_temp_files: true,
   target_file_name: '',
   folder: '',
   concurrent: 10,
@@ -78,6 +79,7 @@ const defaultBaseInfoForm: BaseInfo = {
   concurrent: 10,
   download_dir: 'static/download',
   ffmpeg_download: false,
+  auto_clear_temp_files: true,
 }
 
 function App() {
@@ -199,6 +201,7 @@ function App() {
       kind: 'download',
       url: baseInfoForm.url,
       ffmpeg_download: baseInfoForm.ffmpeg_download,
+      auto_clear_temp_files: baseInfoForm.auto_clear_temp_files,
       target_file_name: baseInfoForm.target_file_name,
       folder: baseInfoForm.folder,
       concurrent: baseInfoForm.concurrent,
@@ -396,6 +399,7 @@ function App() {
         concurrent: payload.concurrent,
         download_dir: payload.download_dir,
         ffmpeg_download: payload.ffmpeg_download,
+        auto_clear_temp_files: payload.auto_clear_temp_files,
         header: payload.headers,
       }
       setBaseInfoEditingTaskId(taskId)
@@ -625,6 +629,9 @@ function buildCommandPreview(payload: TaskPayload) {
       }
       if (payload.ffmpeg_download) {
         parts.push('--ffmpeg_download')
+      }
+      if (!payload.auto_clear_temp_files) {
+        parts.push('--auto_clear_temp_files=false')
       }
       if (payload.target_file_name) {
         parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)

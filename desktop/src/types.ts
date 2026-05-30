@@ -2,6 +2,7 @@ export type DownloadPayload = {
   kind: 'download'
   url: string
   ffmpeg_download: boolean
+  auto_clear_temp_files: boolean
   target_file_name: string
   folder: string
   concurrent: number
@@ -76,6 +77,7 @@ export type BaseInfo = {
   concurrent: number
   download_dir: string
   ffmpeg_download: boolean
+  auto_clear_temp_files: boolean
 }
 
 export type HeaderRow = {
