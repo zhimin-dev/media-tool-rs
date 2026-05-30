@@ -115,7 +115,7 @@ function App() {
 
     const loadTasks = async () => {
       try {
-        const records = await fetchTasks()
+        const records = await fetchTasks(currentTaskPage)
         if (alive) {
           setTasks(records)
           setError('')
@@ -133,11 +133,11 @@ function App() {
       alive = false
       window.clearInterval(timer)
     }
-  }, [taskRefreshInterval])
+  }, [currentTaskPage, taskRefreshInterval])
 
   const handleManualRefresh = async () => {
     try {
-      const records = await fetchTasks()
+      const records = await fetchTasks(currentTaskPage)
       setTasks(records)
       setError('')
     } catch {

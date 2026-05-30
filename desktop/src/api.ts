@@ -1,4 +1,4 @@
-import type { BaseInfo, CreateTaskRequest, HeaderPreset, TaskDetail, TaskRecord } from './types'
+import type { BaseInfo, CreateTaskRequest, HeaderPreset, TaskDetail, TaskKind, TaskRecord } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -11,8 +11,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T
 }
 
-export async function fetchTasks(): Promise<TaskRecord[]> {
-  const response = await fetch(`${API_BASE}/tasks`)
+export async function fetchTasks(kind?: TaskKind): Promise<TaskRecord[]> {
+  const search = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+  const response = await fetch(`${API_BASE}/tasks${search}`)
   return parseResponse<TaskRecord[]>(response)
 }
 
