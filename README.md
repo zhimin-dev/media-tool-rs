@@ -71,6 +71,7 @@ cargo run -- serve --port=8080
 cd desktop
 npm install
 npm run dev
+# 或者使用 npm run tauri dev
 ```
 
 默认开发地址是 `http://127.0.0.1:5173`，Vite 已代理 `/api` 到 `http://127.0.0.1:8080`。
