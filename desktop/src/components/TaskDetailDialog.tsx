@@ -28,6 +28,13 @@ function TaskDetailDialog({ open, loading, detail, onClose, onOpenVideo }: TaskD
                 </Button>
               </Box>
             ) : null}
+            {(detail.task.payload.kind === 'combine' || detail.task.payload.kind === 'cut') && detail.task.status === 'success' && detail.task.result_path ? (
+              <Box>
+                <Button size="small" variant="outlined" onClick={() => onOpenVideo(detail.task)}>
+                  打开播放
+                </Button>
+              </Box>
+            ) : null}
             <Typography variant="subtitle2">目录内容：</Typography>
             <List dense>
               {detail.output_files.length === 0 ? (
