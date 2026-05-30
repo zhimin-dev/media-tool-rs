@@ -196,11 +196,17 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks", web::post().to(create_task))
             .route("/api/tasks/{id}/detail", web::get().to(get_task_detail))
             .route("/api/tasks/{id}/retry", web::post().to(retry_task))
-            .route("/api/tasks/{id}/base-info", web::put().to(update_task_base_info))
+            .route(
+                "/api/tasks/{id}/base-info",
+                web::put().to(update_task_base_info),
+            )
             .route("/api/tasks/{id}", web::delete().to(delete_task))
             .route("/api/header-presets", web::get().to(list_header_presets))
             .route("/api/header-presets", web::post().to(save_header_preset))
-            .route("/api/header-presets/{host}", web::delete().to(delete_header_preset))
+            .route(
+                "/api/header-presets/{host}",
+                web::delete().to(delete_header_preset),
+            )
             .route("/api/upload-video", web::post().to(upload_video))
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
@@ -251,7 +257,7 @@ async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> 
     };
 
     let upload_sub_dir = sanitize_upload_sub_dir(&query.sub_dir);
-    let upload_dir = if upload_sub_dir.is_empty() {
+    let upload_dir = if upload_sub_dir.as_os_str().is_empty() {
         current_dir.join("static").join("uploads")
     } else {
         current_dir
@@ -319,7 +325,10 @@ async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> Ht
     }
 }
 
-async fn list_tasks(query: web::Query<ListTasksQuery>, state: web::Data<AppState>) -> impl Responder {
+async fn list_tasks(
+    query: web::Query<ListTasksQuery>,
+    state: web::Data<AppState>,
+) -> impl Responder {
     let mut tasks = state
         .tasks
         .read()
@@ -414,11 +423,7 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
     let retry_dir = resolve_task_directory(&source_task);
     let payload = hydrate_retry_payload(source_task.payload, retry_dir);
-    let task = build_task_record(
-        id,
-        Some(format!("{}（重试）", source_task.title)),
-        payload,
-    );
+    let task = build_task_record(id, Some(format!("{}（重试）", source_task.title)), payload);
     let payload = task.payload.clone();
     {
         let mut tasks = state.tasks.write().await;
@@ -942,8 +947,8 @@ async fn run_cut_task(
             format!("./static/cut/{}", output_name)
         };
 
-        let success =
-            cut(input.clone(), start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
+        let success = cut(input.clone(), start, duration, target.clone())
+            .map_err(|_| "截取失败".to_string())?;
         if !success {
             return Err("截取视频失败".to_string());
         }
@@ -981,33 +986,34 @@ fn sanitize_upload_file_name(file_name: &str) -> String {
         return fallback;
     }
 
-    fn sanitize_upload_sub_dir(sub_dir: &str) -> PathBuf {
-        let mut path = PathBuf::new();
-        for segment in sub_dir.split(['/', '\\']) {
-            let trimmed = segment.trim();
-            if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
-                continue;
-            }
-            let clean = trimmed
-                .chars()
-                .map(|char| match char {
-                    'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => char,
-                    _ => '_',
-                })
-                .collect::<String>();
-            if clean.is_empty() || clean == "." || clean == ".." {
-                continue;
-            }
-            path.push(clean);
-        }
-        path
-    }
     let clean = name.replace(['/', '\\'], "_");
     if clean.is_empty() {
         fallback
     } else {
         clean
     }
+}
+
+fn sanitize_upload_sub_dir(sub_dir: &str) -> PathBuf {
+    let mut path = PathBuf::new();
+    for segment in sub_dir.split(['/', '\\']) {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+            continue;
+        }
+        let clean = trimmed
+            .chars()
+            .map(|char| match char {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => char,
+                _ => '_',
+            })
+            .collect::<String>();
+        if clean.is_empty() || clean == "." || clean == ".." {
+            continue;
+        }
+        path.push(clean);
+    }
+    path
 }
 
 fn write_base_info(folder_path: &PathBuf, base_info: &BaseInfo) -> std::io::Result<()> {
@@ -1089,9 +1095,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             set_height,
             set_width,
         } => {
-            let mut parts = vec![
-                "media-tool-rs combine".to_string(),
-            ];
+            let mut parts = vec!["media-tool-rs combine".to_string()];
             if !inputs.is_empty() {
                 parts.push(format!(
                     "--inputs={}",

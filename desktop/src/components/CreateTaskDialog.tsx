@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
 import { uploadVideo } from '../api'
@@ -61,7 +61,7 @@ function CreateTaskDialog({
   const [testFiles, setTestFiles] = useState<string[]>([])
   const [combineUploadLoading, setCombineUploadLoading] = useState(false)
   const [combineUploadError, setCombineUploadError] = useState('')
-  const [combineUploadSubDir, setCombineUploadSubDir] = useState('')
+  const [combineUploadSubDir] = useState(() => `combine/${generateRandomString(12)}`)
 
   // Derive tested: true only when the snapshot matches the current form values
   const formKey = [
@@ -72,15 +72,6 @@ function CreateTaskDialog({
   ].join('|')
   const combineTested = testedKey !== null && testedKey === formKey
 
-  useEffect(() => {
-    if (!open || page !== 'combine') return
-    setTestedKey(null)
-    setTestPreviewOpen(false)
-    setTestFiles([])
-    setCombineUploadError('')
-    setCombineUploadSubDir(`combine/${generateRandomString(12)}`)
-  }, [open, page])
-
   const handleCombineFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
     if (files.length === 0) return
@@ -88,14 +79,10 @@ function CreateTaskDialog({
     setCombineUploadLoading(true)
     setCombineUploadError('')
     try {
-      const subDir = combineUploadSubDir || `combine/${generateRandomString(12)}`
-      if (!combineUploadSubDir) {
-        setCombineUploadSubDir(subDir)
-      }
       const uploadedFiles = await Promise.all(
         files.map((file) =>
           uploadVideo(file, {
-            subDir,
+            subDir: combineUploadSubDir,
           }),
         ),
       )

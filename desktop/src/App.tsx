@@ -569,6 +569,7 @@ function App() {
       </Container>
 
       <CreateTaskDialog
+        key={`${currentTaskPage}-${createDialogOpen ? 'open' : 'closed'}`}
         open={createDialogOpen && isTaskPage(currentPage)}
         page={currentTaskPage}
         createTitle={createTitle}
