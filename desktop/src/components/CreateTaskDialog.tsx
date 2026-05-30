@@ -27,12 +27,6 @@ type CreateTaskDialogProps = {
   onSubmit: () => void
 }
 
-function convertPathToRegex(filePath: string): string {
-  // Replace the last run of digits before the file extension with (.*)
-  // e.g. /path/jepg_1.mp4 → /path/jepg_(.*).mp4
-  return filePath.replace(/\d+(\.[^./\\]+)$/, '(.*)$1')
-}
-
 function generateTestFiles(regName: string, start: number, end: number): string[] {
   const files: string[] = []
   for (let i = start; i <= end; i++) {
@@ -67,21 +61,38 @@ function CreateTaskDialog({
   const [testFiles, setTestFiles] = useState<string[]>([])
   const [combineUploadLoading, setCombineUploadLoading] = useState(false)
   const [combineUploadError, setCombineUploadError] = useState('')
+  const [combineUploadSubDir] = useState(() => `combine/${generateRandomString(12)}`)
 
   // Derive tested: true only when the snapshot matches the current form values
-  const formKey = [combineForm.reg_name, combineForm.reg_name_start, combineForm.reg_name_end].join('|')
+  const formKey = [
+    combineForm.reg_name,
+    combineForm.reg_name_start,
+    combineForm.reg_name_end,
+    combineForm.inputs.join('|'),
+  ].join('|')
   const combineTested = testedKey !== null && testedKey === formKey
 
   const handleCombineFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+    const files = Array.from(event.target.files ?? [])
+    if (files.length === 0) return
     event.target.value = ''
     setCombineUploadLoading(true)
     setCombineUploadError('')
     try {
-      const uploaded = await uploadVideo(file)
-      const regName = convertPathToRegex(uploaded.path)
-      onCombineFormChange((current) => ({ ...current, reg_name: regName }))
+      const uploadedFiles = await Promise.all(
+        files.map((file) =>
+          uploadVideo(file, {
+            subDir: combineUploadSubDir,
+          }),
+        ),
+      )
+      const uploadedPaths = uploadedFiles.map((item) => item.path)
+      onCombineFormChange((current) => ({
+        ...current,
+        inputs: uploadedPaths,
+        reg_name_start: 1,
+        reg_name_end: uploadedPaths.length,
+      }))
     } catch (error) {
       const message = error instanceof Error ? error.message : '上传文件失败'
       setCombineUploadError(message)
@@ -91,11 +102,14 @@ function CreateTaskDialog({
   }
 
   const handleCombineTest = () => {
-    const files = generateTestFiles(
-      combineForm.reg_name,
-      combineForm.reg_name_start,
-      combineForm.reg_name_end,
-    )
+    const files =
+      combineForm.inputs.length > 0
+        ? combineForm.inputs
+        : generateTestFiles(
+            combineForm.reg_name,
+            combineForm.reg_name_start,
+            combineForm.reg_name_end,
+          )
     setTestFiles(files)
     setTestPreviewOpen(true)
   }
@@ -196,14 +210,24 @@ function CreateTaskDialog({
                 fullWidth
                 label="文件正则模式"
                 value={combineForm.reg_name}
-                helperText="示例：~/file/path/jepg_(.*).mp4，选择文件后自动生成，也可手动输入"
-                onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value }))}
+               helperText={combineForm.inputs.length > 0 ? '已选择文件后将优先使用上传列表' : '示例：~/file/path/jepg_(.*).mp4，选择文件后自动生成，也可手动输入'}
+               onChange={(event) => onCombineFormChange((current) => ({ ...current, reg_name: event.target.value, inputs: [] }))}
               />
               <Button variant="outlined" component="label" sx={{ mt: 0.5, whiteSpace: 'nowrap', minWidth: 100 }}>
                {combineUploadLoading ? '上传中...' : '选择文件'}
-                <input type="file" accept="video/*" hidden onChange={handleCombineFilePick} />
+               <input type="file" accept="video/*" multiple hidden onChange={handleCombineFilePick} />
               </Button>
             </Stack>
+            {combineUploadSubDir ? (
+              <Typography variant="body2" color="text.secondary">
+               本次任务上传目录：static/uploads/{combineUploadSubDir}
+              </Typography>
+            ) : null}
+            {combineForm.inputs.length > 0 ? (
+              <Typography variant="body2" color="text.secondary">
+               已选择并上传 {combineForm.inputs.length} 个文件
+              </Typography>
+            ) : null}
             <TextField
               fullWidth
               label="输出文件名"
@@ -284,7 +308,11 @@ function CreateTaskDialog({
         <Button onClick={onClose}>取消</Button>
         {page === 'combine' ? (
           <>
-            <Button onClick={handleCombineTest} variant="outlined" disabled={!combineForm.reg_name}>
+            <Button
+              onClick={handleCombineTest}
+              variant="outlined"
+              disabled={!combineForm.reg_name && combineForm.inputs.length === 0}
+            >
               测试
             </Button>
             {combineTested ? (
@@ -327,3 +355,12 @@ function CreateTaskDialog({
 }
 
 export default CreateTaskDialog
+
+function generateRandomString(length: number) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let result = ''
+  for (let index = 0; index < length; index += 1) {
+    result += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return result
+}

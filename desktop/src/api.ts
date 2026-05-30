@@ -29,9 +29,16 @@ export async function createTask(request: CreateTaskRequest): Promise<TaskRecord
   return parseResponse<TaskRecord>(response)
 }
 
-export async function uploadVideo(file: File): Promise<{ path: string }> {
-  const fileName = encodeURIComponent(file.name || 'uploaded.mp4')
-  const response = await fetch(`${API_BASE}/upload-video?file_name=${fileName}`, {
+type UploadVideoOptions = {
+  subDir?: string
+}
+
+export async function uploadVideo(file: File, options: UploadVideoOptions = {}): Promise<{ path: string }> {
+  const params = new URLSearchParams({ file_name: file.name || 'uploaded.mp4' })
+  if (options.subDir?.trim()) {
+    params.set('sub_dir', options.subDir.trim())
+  }
+  const response = await fetch(`${API_BASE}/upload-video?${params.toString()}`, {
     method: 'POST',
     headers: {
       'Content-Type': file.type || 'application/octet-stream',
