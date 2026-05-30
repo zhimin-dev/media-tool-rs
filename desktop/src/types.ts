@@ -32,6 +32,7 @@ export type CutPayload = {
 }
 
 export type TaskPayload = DownloadPayload | CombinePayload | CutPayload
+export type TaskKind = TaskPayload['kind']
 
 export type TaskStatus = 'queued' | 'running' | 'success' | 'failed'
 

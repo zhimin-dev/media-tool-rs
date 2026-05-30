@@ -24,6 +24,33 @@ pub enum TaskStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskKind {
+    Download,
+    Combine,
+    Cut,
+}
+
+impl TaskKind {
+    fn file_name(self) -> &'static str {
+        match self {
+            TaskKind::Download => "download_tasks.json",
+            TaskKind::Combine => "combine_tasks.json",
+            TaskKind::Cut => "cut_tasks.json",
+        }
+    }
+
+    fn matches_payload(self, payload: &TaskPayload) -> bool {
+        matches!(
+            (self, payload),
+            (TaskKind::Download, TaskPayload::Download { .. })
+                | (TaskKind::Combine, TaskPayload::Combine { .. })
+                | (TaskKind::Cut, TaskPayload::Cut { .. })
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskPayload {
@@ -116,12 +143,21 @@ struct AppState {
     executor: Arc<Semaphore>,
     header_presets: Arc<RwLock<Vec<HeaderPreset>>>,
     header_presets_path: Arc<PathBuf>,
+    tasks_config_dir: Arc<PathBuf>,
 }
 
 impl AppState {
     fn new() -> Self {
         let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let tasks = load_download_tasks(current_dir.join("static").join("download"));
+        let tasks_config_dir = current_dir.join("config").join("tasks");
+        if let Err(error) = ensure_task_files(&tasks_config_dir) {
+            println!("failed to initialize task config files: {}", error);
+        }
+        let mut tasks = load_tasks_from_config(&tasks_config_dir);
+        if tasks.is_empty() {
+            tasks = load_download_tasks(current_dir.join("static").join("download"));
+            let _ = write_tasks_to_config(&tasks_config_dir, &tasks);
+        }
         let next_id = tasks.keys().copied().max().unwrap_or(0) + 1;
         let header_presets_path = current_dir.join("config").join("header_presets.json");
         if let Err(error) = ensure_header_presets_file(&header_presets_path) {
@@ -133,6 +169,7 @@ impl AppState {
             executor: Arc::new(Semaphore::new(1)),
             header_presets: Arc::new(RwLock::new(load_header_presets(&header_presets_path))),
             header_presets_path: Arc::new(header_presets_path),
+            tasks_config_dir: Arc::new(tasks_config_dir),
         }
     }
 }
@@ -192,6 +229,11 @@ struct UploadVideoQuery {
 #[derive(Serialize)]
 struct UploadVideoResponse {
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListTasksQuery {
+    kind: Option<TaskKind>,
 }
 
 async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> impl Responder {
@@ -258,12 +300,18 @@ async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> Ht
     }
 }
 
-async fn list_tasks(state: web::Data<AppState>) -> impl Responder {
+async fn list_tasks(query: web::Query<ListTasksQuery>, state: web::Data<AppState>) -> impl Responder {
     let mut tasks = state
         .tasks
         .read()
         .await
         .values()
+        .filter(|task| {
+            query
+                .kind
+                .map(|kind| kind.matches_payload(&task.payload))
+                .unwrap_or(true)
+        })
         .cloned()
         .collect::<Vec<_>>();
     tasks.sort_by(|left, right| right.id.cmp(&left.id));
@@ -290,7 +338,15 @@ async fn create_task(
     let task = build_task_record(id, request.title.clone(), request.payload.clone());
     let payload = task.payload.clone();
 
-    state.tasks.write().await.insert(id, task.clone());
+    {
+        let mut tasks = state.tasks.write().await;
+        tasks.insert(id, task.clone());
+    }
+    if let Err(error) = persist_tasks(&state).await {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存任务配置失败: {}", error),
+        }));
+    }
 
     let background_state = state.get_ref().clone();
     tokio::spawn(async move {
@@ -349,6 +405,11 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
         let mut tasks = state.tasks.write().await;
         tasks.remove(&source_id);
         tasks.insert(id, task.clone());
+    }
+    if let Err(error) = persist_tasks(&state).await {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存任务配置失败: {}", error),
+        }));
     }
 
     let background_state = state.get_ref().clone();
@@ -443,7 +504,7 @@ async fn update_task_base_info(
         }));
     }
 
-    update_task(&state, id, |record| {
+    if let Err(error) = update_task(&state, id, |record| {
         record.payload = TaskPayload::Download {
             url: base_info.url.clone(),
             ffmpeg_download: base_info.ffmpeg_download,
@@ -456,7 +517,12 @@ async fn update_task_base_info(
         record.command_preview = build_command_preview(&record.payload);
         record.message = Some("base_info.json 已更新，可重试".to_string());
     })
-    .await;
+    .await
+    {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存任务配置失败: {}", error),
+        }));
+    }
 
     let updated = {
         let tasks = state.tasks.read().await;
@@ -495,6 +561,11 @@ async fn delete_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl R
     }
 
     state.tasks.write().await.remove(&id);
+    if let Err(error) = persist_tasks(&state).await {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存任务配置失败: {}", error),
+        }));
+    }
     HttpResponse::Ok().json(task)
 }
 
@@ -580,12 +651,15 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
         return;
     };
 
-    update_task(&state, id, |task| {
+    if let Err(error) = update_task(&state, id, |task| {
         task.status = TaskStatus::Running;
         task.started_at = Some(now());
         task.message = Some("任务执行中".to_string());
     })
-    .await;
+    .await
+    {
+        println!("failed to persist task {} running status: {}", id, error);
+    }
 
     let result = match payload {
         TaskPayload::Download {
@@ -642,7 +716,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
         } => run_cut_task(input, start, duration, target_file_name).await,
     };
 
-    update_task(&state, id, |task| {
+    if let Err(error) = update_task(&state, id, |task| {
         task.finished_at = Some(now());
         match result {
             Ok(outcome) => {
@@ -657,10 +731,13 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             }
         }
     })
-    .await;
+    .await
+    {
+        println!("failed to persist task {} result: {}", id, error);
+    }
 }
 
-async fn update_task<F>(state: &AppState, id: u64, updater: F)
+async fn update_task<F>(state: &AppState, id: u64, updater: F) -> Result<(), String>
 where
     F: FnOnce(&mut TaskRecord),
 {
@@ -668,6 +745,7 @@ where
     if let Some(task) = tasks.get_mut(&id) {
         updater(task);
     }
+    write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
 }
 
 fn build_task_record(id: u64, title: Option<String>, payload: TaskPayload) -> TaskRecord {
@@ -839,10 +917,11 @@ async fn run_cut_task(
         };
 
         let success =
-            cut(input, start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
+            cut(input.clone(), start, duration, target.clone()).map_err(|_| "截取失败".to_string())?;
         if !success {
             return Err("截取视频失败".to_string());
         }
+        remove_uploaded_source_if_needed(&current_dir, &input);
 
         Ok(TaskOutcome {
             message: "截取完成".to_string(),
@@ -1167,8 +1246,97 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
         );
         next_id += 1;
     }
-
     tasks
+}
+
+fn task_kind_from_payload(payload: &TaskPayload) -> TaskKind {
+    match payload {
+        TaskPayload::Download { .. } => TaskKind::Download,
+        TaskPayload::Combine { .. } => TaskKind::Combine,
+        TaskPayload::Cut { .. } => TaskKind::Cut,
+    }
+}
+
+fn ensure_task_files(task_config_dir: &PathBuf) -> std::io::Result<()> {
+    fs::create_dir_all(task_config_dir)?;
+    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+        let file_path = task_config_dir.join(kind.file_name());
+        if !file_path.exists() {
+            fs::write(file_path, "[]")?;
+        }
+    }
+    Ok(())
+}
+
+fn load_tasks_from_config(task_config_dir: &PathBuf) -> HashMap<u64, TaskRecord> {
+    let mut tasks = HashMap::new();
+    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+        let file_path = task_config_dir.join(kind.file_name());
+        let records = fs::read_to_string(file_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<Vec<TaskRecord>>(&content).ok())
+            .unwrap_or_default();
+        for record in records {
+            tasks.insert(record.id, record);
+        }
+    }
+    tasks
+}
+
+fn write_tasks_to_config(
+    task_config_dir: &PathBuf,
+    tasks: &HashMap<u64, TaskRecord>,
+) -> std::io::Result<()> {
+    ensure_task_files(task_config_dir)?;
+    let mut download = Vec::new();
+    let mut combine = Vec::new();
+    let mut cut = Vec::new();
+    for task in tasks.values().cloned() {
+        match task_kind_from_payload(&task.payload) {
+            TaskKind::Download => download.push(task),
+            TaskKind::Combine => combine.push(task),
+            TaskKind::Cut => cut.push(task),
+        }
+    }
+    for records in [&mut download, &mut combine, &mut cut] {
+        records.sort_by(|left, right| right.id.cmp(&left.id));
+    }
+    fs::write(
+        task_config_dir.join(TaskKind::Download.file_name()),
+        serde_json::to_string_pretty(&download)?,
+    )?;
+    fs::write(
+        task_config_dir.join(TaskKind::Combine.file_name()),
+        serde_json::to_string_pretty(&combine)?,
+    )?;
+    fs::write(
+        task_config_dir.join(TaskKind::Cut.file_name()),
+        serde_json::to_string_pretty(&cut)?,
+    )?;
+    Ok(())
+}
+
+async fn persist_tasks(state: &web::Data<AppState>) -> Result<(), String> {
+    let tasks = state.tasks.read().await;
+    write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
+}
+
+fn remove_uploaded_source_if_needed(current_dir: &Path, input: &str) {
+    let uploads_dir = current_dir.join("static").join("uploads");
+    let Ok(uploads_dir) = fs::canonicalize(uploads_dir) else {
+        return;
+    };
+    let input_path = PathBuf::from(input);
+    if !input_path.is_absolute() {
+        return;
+    }
+    let Ok(canonical_input) = fs::canonicalize(input_path) else {
+        return;
+    };
+    if !canonical_input.starts_with(&uploads_dir) || !canonical_input.is_file() {
+        return;
+    }
+    let _ = fs::remove_file(canonical_input);
 }
 
 fn read_task_base_info(folder_path: &PathBuf) -> Option<BaseInfo> {
