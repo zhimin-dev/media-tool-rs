@@ -862,21 +862,25 @@ fn ensure_directory_exists(path: PathBuf) -> std::io::Result<()> {
     if !path.exists() {
         std::fs::create_dir_all(path)?;
     }
-
-    fn sanitize_upload_file_name(file_name: &str) -> String {
-        let fallback = "uploaded.mp4".to_string();
-        let name = Path::new(file_name)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .trim();
-        if name.is_empty() {
-            return fallback;
-        }
-        let clean = name.replace(['/', '\\'], "_");
-        if clean.is_empty() { fallback } else { clean }
-    }
     Ok(())
+}
+
+fn sanitize_upload_file_name(file_name: &str) -> String {
+    let fallback = "uploaded.mp4".to_string();
+    let name = Path::new(file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() {
+        return fallback;
+    }
+    let clean = name.replace(['/', '\\'], "_");
+    if clean.is_empty() {
+        fallback
+    } else {
+        clean
+    }
 }
 
 fn write_base_info(folder_path: &PathBuf, base_info: &BaseInfo) -> std::io::Result<()> {

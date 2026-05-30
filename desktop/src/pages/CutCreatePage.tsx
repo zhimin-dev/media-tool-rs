@@ -18,6 +18,7 @@ function CutCreatePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const objectUrlRef = useRef<string>('')
   const [hasVideo, setHasVideo] = useState(false)
+  const [videoUrl, setVideoUrl] = useState('')
   const [inputPath, setInputPath] = useState('')
   const [videoDuration, setVideoDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
@@ -42,11 +43,7 @@ function CutCreatePage() {
 
     const url = URL.createObjectURL(file)
     objectUrlRef.current = url
-    const video = videoRef.current
-    if (video) {
-      video.src = url
-      video.load()
-    }
+    setVideoUrl(url.startsWith('blob:') ? url : '')
     setHasVideo(true)
     setUploading(true)
     setInputPath('')
@@ -95,6 +92,7 @@ function CutCreatePage() {
     startTime !== null &&
     endTime !== null &&
     endTime > startTime
+  const safeVideoUrl = isSafeBlobUrl(videoUrl) ? videoUrl : undefined
 
   const handleCreate = async () => {
     if (!canCreate || startTime === null || endTime === null) return
@@ -144,6 +142,7 @@ function CutCreatePage() {
           <Box sx={{ backgroundColor: '#000', borderRadius: 2, overflow: 'hidden' }}>
             <video
               ref={videoRef}
+              src={safeVideoUrl}
               controls
               style={{ width: '100%', maxHeight: 400, display: 'block' }}
               onLoadedMetadata={handleLoadedMetadata}
@@ -222,3 +221,7 @@ function CutCreatePage() {
 }
 
 export default CutCreatePage
+
+function isSafeBlobUrl(url: string) {
+  return /^blob:[a-z]+:\/\//.test(url)
+}
