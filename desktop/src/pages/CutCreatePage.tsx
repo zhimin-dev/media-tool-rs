@@ -27,7 +27,6 @@ function CutCreatePage() {
   const [startTime, setStartTime] = useState<number | null>(null)
   const [endTime, setEndTime] = useState<number | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
-  const [targetFileName, setTargetFileName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -105,7 +104,7 @@ function CutCreatePage() {
       return
     }
     setError('')
-    setSegments((current) => [...current, { start: startTime, end: endTime, fileName: targetFileName.trim() }])
+    setSegments((current) => [...current, { start: startTime, end: endTime, fileName: '' }])
     setStartTime(null)
     setEndTime(null)
   }
@@ -122,17 +121,13 @@ function CutCreatePage() {
       for (let index = 0; index < segments.length; index += 1) {
         const segment = segments[index]
         const duration = segment.end - segment.start
-        const resolvedFileName = segment.fileName.trim() ||
-          (segments.length > 1 && targetFileName.trim()
-            ? `${targetFileName.trim()}_part${index + 1}`
-            : targetFileName)
         await createTask({
           payload: {
             kind: 'cut',
             input: inputPath.trim(),
             start: segment.start,
             duration,
-            target_file_name: resolvedFileName,
+            target_file_name: segment.fileName.trim(),
           },
         })
       }
@@ -278,19 +273,6 @@ function CutCreatePage() {
             ) : null}
           </Stack>
         ) : null}
-
-        <TextField
-          fullWidth
-          label="默认输出文件名（可选）"
-          value={targetFileName}
-          helperText="不填则使用随机文件名；多片段时作为各片段文件名的默认值"
-          slotProps={{
-            input: {
-              endAdornment: <InputAdornment position="end">.mp4</InputAdornment>,
-            },
-          }}
-          onChange={(event) => setTargetFileName(event.target.value)}
-        />
 
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" onClick={() => navigate('/cut')}>
