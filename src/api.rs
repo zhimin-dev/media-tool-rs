@@ -1057,8 +1057,6 @@ async fn run_cut_task(
         if !success {
             return Err("截取视频失败".to_string());
         }
-        remove_uploaded_source_if_needed(&current_dir, &input);
-
         Ok(TaskOutcome {
             message: "截取完成".to_string(),
             result_path: Some(
@@ -1490,24 +1488,6 @@ fn write_tasks_to_config(
 async fn persist_tasks(state: &web::Data<AppState>) -> Result<(), String> {
     let tasks = state.tasks.read().await;
     write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
-}
-
-fn remove_uploaded_source_if_needed(current_dir: &Path, input: &str) {
-    let uploads_dir = current_dir.join("static").join("uploads");
-    let Ok(uploads_dir) = fs::canonicalize(uploads_dir) else {
-        return;
-    };
-    let input_path = PathBuf::from(input);
-    if !input_path.is_absolute() {
-        return;
-    }
-    let Ok(canonical_input) = fs::canonicalize(input_path) else {
-        return;
-    };
-    if !canonical_input.starts_with(&uploads_dir) || !canonical_input.is_file() {
-        return;
-    }
-    let _ = fs::remove_file(canonical_input);
 }
 
 fn read_task_base_info(folder_path: &PathBuf) -> Option<BaseInfo> {
