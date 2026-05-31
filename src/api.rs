@@ -5,6 +5,7 @@ use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
 use actix_files::{Files, NamedFile};
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -12,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{RwLock, Semaphore};
 use url::Url;
 
@@ -255,11 +258,7 @@ struct ListTasksQuery {
     kind: Option<TaskKind>,
 }
 
-async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> impl Responder {
-    if body.is_empty() {
-        return HttpResponse::BadRequest().body("empty file");
-    }
-
+async fn upload_video(query: web::Query<UploadVideoQuery>, mut payload: web::Payload) -> impl Responder {
     let current_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
@@ -284,12 +283,51 @@ async fn upload_video(query: web::Query<UploadVideoQuery>, body: web::Bytes) -> 
         .map(|ext| ext.to_ascii_lowercase())
         .filter(|ext| !ext.is_empty())
         .unwrap_or_else(|| "mp4".to_string());
-    let target_name = format!("{:x}.{}", md5::compute(&body), extension);
-    let target_path = upload_dir.join(target_name);
-    if !target_path.exists() {
-        if let Err(error) = fs::write(&target_path, body) {
+
+    let temp_path = upload_dir.join(format!("upload-{}.tmp", now()));
+    let mut temp_file = match File::create(&temp_path).await {
+        Ok(file) => file,
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    };
+    let mut has_data = false;
+    let mut digest = md5::Context::new();
+
+    while let Some(chunk_result) = payload.next().await {
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return HttpResponse::BadRequest().body(error.to_string());
+            }
+        };
+        if !chunk.is_empty() {
+            has_data = true;
+            digest.consume(&chunk);
+        }
+        if let Err(error) = temp_file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
             return HttpResponse::InternalServerError().body(error.to_string());
         }
+    }
+    if !has_data {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return HttpResponse::BadRequest().body("empty file");
+    }
+    if let Err(error) = temp_file.flush().await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return HttpResponse::InternalServerError().body(error.to_string());
+    }
+    drop(temp_file);
+
+    let target_name = format!("{:x}.{}", digest.finalize(), extension);
+    let target_path = upload_dir.join(target_name);
+    if !target_path.exists() {
+        if let Err(error) = fs::rename(&temp_path, &target_path) {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return HttpResponse::InternalServerError().body(error.to_string());
+        }
+    } else {
+        let _ = tokio::fs::remove_file(&temp_path).await;
     }
 
     HttpResponse::Ok().json(UploadVideoResponse {

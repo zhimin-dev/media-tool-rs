@@ -18,7 +18,7 @@ export function isTaskPage(page: AppPage): page is TaskPage {
 }
 
 export function getPageFromPath(pathname: string): AppPage {
-  const matched = appPages.find((page) => pathname === page.path)
+  const matched = appPages.find((page) => pathname === page.path || pathname.startsWith(`${page.path}/`))
   return matched?.key ?? 'download'
 }
 
