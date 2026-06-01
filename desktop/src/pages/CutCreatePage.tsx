@@ -3,6 +3,8 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
+  FormControlLabel,
   InputAdornment,
   Paper,
   Slider,
@@ -11,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
-import { createTask, uploadVideo } from '../api'
+import { createCutBatch, uploadVideo } from '../api'
 
 type Segment = { start: number; end: number; fileName: string }
 
@@ -30,6 +32,7 @@ function CutCreatePage() {
   const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [deleteInputFile, setDeleteInputFile] = useState(false)
   const uploadSeqRef = useRef(0)
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,19 +121,15 @@ function CutCreatePage() {
     setLoading(true)
     setError('')
     try {
-      for (let index = 0; index < segments.length; index += 1) {
-        const segment = segments[index]
-        const duration = segment.end - segment.start
-        await createTask({
-          payload: {
-            kind: 'cut',
-            input: inputPath.trim(),
-            start: segment.start,
-            duration,
-            target_file_name: segment.fileName.trim(),
-          },
-        })
-      }
+      await createCutBatch({
+        input: inputPath.trim(),
+        delete_input_file: deleteInputFile,
+        segments: segments.map((segment) => ({
+          start: segment.start,
+          duration: segment.end - segment.start,
+          target_file_name: segment.fileName.trim(),
+        })),
+      })
       navigate('/cut')
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建任务失败')
@@ -271,6 +270,16 @@ function CutCreatePage() {
                 ))}
               </Stack>
             ) : null}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={deleteInputFile}
+                  onChange={(event) => setDeleteInputFile(event.target.checked)}
+                />
+              }
+              label="子任务全部完成后删除输入视频"
+            />
           </Stack>
         ) : null}
 

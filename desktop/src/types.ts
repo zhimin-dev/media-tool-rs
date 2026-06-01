@@ -31,9 +31,23 @@ export type CutPayload = {
   start: number
   duration: number
   target_file_name: string
+  delete_input_file: boolean
 }
 
-export type TaskPayload = DownloadPayload | CombinePayload | CutPayload
+export type CutSegment = {
+  start: number
+  duration: number
+  target_file_name: string
+}
+
+export type CutBatchPayload = {
+  kind: 'cut_batch'
+  input: string
+  delete_input_file: boolean
+  segments: CutSegment[]
+}
+
+export type TaskPayload = DownloadPayload | CombinePayload | CutPayload | CutBatchPayload
 export type TaskKind = TaskPayload['kind']
 
 export type TaskStatus = 'queued' | 'running' | 'success' | 'failed'
@@ -48,6 +62,8 @@ export type TaskRecord = {
   command_preview: string
   message: string | null
   result_path: string | null
+  parent_id: number | null
+  child_task_ids: number[]
   payload: TaskPayload
 }
 
@@ -61,6 +77,7 @@ export type TaskDetail = {
   output_dir: string | null
   output_files: string[]
   base_info: BaseInfo | null
+  child_tasks: TaskRecord[]
 }
 
 export type HeaderPreset = {

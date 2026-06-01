@@ -69,6 +69,7 @@ const defaultCutForm: CutPayload = {
   start: 0,
   duration: 3,
   target_file_name: '',
+delete_input_file: false,
 }
 
 const defaultBaseInfoForm: BaseInfo = {
@@ -113,6 +114,7 @@ function App() {
   const [presetFormHost, setPresetFormHost] = useState('')
   const [presetFormRows, setPresetFormRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
   const [editingPresetHost, setEditingPresetHost] = useState('')
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -180,7 +182,10 @@ function App() {
   const playerHeaders = useMemo(() => headerRowsToMap(playerHeaderRows), [playerHeaderRows])
   const downloadTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'download'), [tasks])
   const combineTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'combine'), [tasks])
-  const cutTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'cut'), [tasks])
+  const cutTasks = useMemo(
+    () => tasks.filter((task) => task.payload.kind === 'cut' || task.payload.kind === 'cut_batch'),
+    [tasks],
+  )
 
   const currentPayload = useMemo<TaskPayload>(() => {
     if (currentTaskPage === 'download') {
@@ -271,12 +276,18 @@ function App() {
     setEditingPresetHost(preset.host)
     setPresetFormHost(preset.host)
     setPresetFormRows(mapToHeaderRows(preset.headers))
+    setPresetDialogOpen(true)
   }
 
   const resetPresetForm = () => {
     setEditingPresetHost('')
     setPresetFormHost('')
     setPresetFormRows([{ key: '', value: '' }])
+  }
+
+  const handleOpenNewPreset = () => {
+    resetPresetForm()
+    setPresetDialogOpen(true)
   }
 
   const handleSavePreset = async () => {
@@ -304,6 +315,7 @@ function App() {
       setSelectedPresetHost(preset.host)
       setEditingPresetHost(preset.host)
       setPresetFormHost(preset.host)
+      setPresetDialogOpen(false)
       setSuccessMessage('header 预设已保存')
       setError('')
     } catch (requestError) {
@@ -319,6 +331,7 @@ function App() {
       setSelectedPresetHost((current) => (current === host ? '' : current))
       if (editingPresetHost === host) {
         resetPresetForm()
+        setPresetDialogOpen(false)
       }
       setSuccessMessage('header 预设已删除')
       setError('')
@@ -551,10 +564,13 @@ function App() {
               element={
                 <HeaderPresetsPage
                   headerPresets={headerPresets}
+                  presetDialogOpen={presetDialogOpen}
                   editingPresetHost={editingPresetHost}
                   presetFormHost={presetFormHost}
                   presetFormRows={presetFormRows}
                   matchedPresetHost={matchedPresetHost}
+                  onOpenNewPreset={handleOpenNewPreset}
+                  onClosePresetDialog={() => setPresetDialogOpen(false)}
                   onPresetFormHostChange={setPresetFormHost}
                   onPresetHeaderChange={handlePresetHeaderChange}
                   onAddPresetHeader={handleAddPresetHeader}
@@ -684,8 +700,18 @@ function buildCommandPreview(payload: TaskPayload) {
     }
     case 'cut': {
       const parts = ['media-tool-rs cut', `-i=${payload.input}`, `-s=${payload.start}`, `-d=${payload.duration}`]
+      if (payload.delete_input_file) {
+        parts.push('--delete_input_file')
+      }
       if (payload.target_file_name) {
         parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
+      }
+      return parts.join(' ')
+    }
+    case 'cut_batch': {
+      const parts = ['media-tool-rs cut-batch', `-i=${payload.input}`, `--segments=${payload.segments.length}`]
+      if (payload.delete_input_file) {
+        parts.push('--delete_input_file')
       }
       return parts.join(' ')
     }

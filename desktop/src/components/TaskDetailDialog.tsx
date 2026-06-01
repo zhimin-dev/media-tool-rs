@@ -10,7 +10,7 @@ type TaskDetailDialogProps = {
 }
 
 function TaskDetailDialog({ open, loading, detail, onClose, onOpenVideo }: TaskDetailDialogProps) {
-  const isCutTask = detail?.task.payload.kind === 'cut'
+  const isCutTask = detail?.task.payload.kind === 'cut' || detail?.task.payload.kind === 'cut_batch'
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
@@ -39,7 +39,36 @@ function TaskDetailDialog({ open, loading, detail, onClose, onOpenVideo }: TaskD
                 </Button>
               </Box>
             ) : null}
-            {isCutTask ? (
+            {detail.child_tasks.length > 0 ? (
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2">子任务：</Typography>
+                {detail.child_tasks.length > 0 ? (
+                  <List dense>
+                    {detail.child_tasks.map((childTask, index) => (
+                      <ListItem key={childTask.id} disablePadding>
+                        <ListItemButton disabled={!childTask.result_path} onClick={() => onOpenVideo(childTask)}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="body2">
+                              {index + 1}. {childTask.title}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {childTask.message ?? '等待结果'}
+                            </Typography>
+                            {childTask.result_path ? (
+                              <Typography variant="body2" color="primary">
+                                {childTask.result_path.split('/').pop() ?? childTask.result_path} （点击播放）
+                              </Typography>
+                            ) : null}
+                          </Stack>
+                        </ListItemButton>
+                      </ListItem>
+                    ))}
+                  </List>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">暂无截取文件</Typography>
+                )}
+              </Stack>
+            ) : isCutTask ? (
               <Stack spacing={0.5}>
                 <Typography variant="subtitle2">截取视频文件：</Typography>
                 {detail.task.result_path ? (

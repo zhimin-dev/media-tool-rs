@@ -233,7 +233,11 @@ pub mod cmd {
     //ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
     pub fn combine_ts(file: String, target: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
-        println!("{} file --- target {}", file.clone(), target_with_ext.clone());
+        println!(
+            "{} file --- target {}",
+            file.clone(),
+            target_with_ext.clone()
+        );
         let output = Command::new("ffmpeg")
             .arg("-y")
             .arg("-f")
