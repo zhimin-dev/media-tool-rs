@@ -80,15 +80,13 @@ pub async fn download_file(
     if resp.status() == 200 {
         let body = resp.bytes().await;
         match body {
-            Ok(bytes) => {
-                fs::write(file_name.clone(), bytes).map_or_else(
-                    |error| {
-                        println!("write file error {}: {}", file_name.clone(), error);
-                        Ok(false)
-                    },
-                    |_| Ok(true),
-                )
-            }
+            Ok(bytes) => fs::write(file_name.clone(), bytes).map_or_else(
+                |error| {
+                    println!("write file error {}: {}", file_name.clone(), error);
+                    Ok(false)
+                },
+                |_| Ok(true),
+            ),
             Err(e) => {
                 println!("get data error");
                 Ok(false)

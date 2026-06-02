@@ -1,4 +1,12 @@
-import type { BaseInfo, CreateTaskRequest, HeaderPreset, TaskDetail, TaskKind, TaskRecord } from './types'
+import type {
+  BaseInfo,
+  CreateTaskRequest,
+  CutSegment,
+  HeaderPreset,
+  TaskDetail,
+  TaskKind,
+  TaskRecord,
+} from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -26,6 +34,24 @@ export async function createTask(request: CreateTaskRequest): Promise<TaskRecord
     body: JSON.stringify(request),
   })
 
+  return parseResponse<TaskRecord>(response)
+}
+
+type CreateCutBatchRequest = {
+  title?: string
+  input: string
+  delete_input_file?: boolean
+  segments: CutSegment[]
+}
+
+export async function createCutBatch(request: CreateCutBatchRequest): Promise<TaskRecord> {
+  const response = await fetch(`${API_BASE}/tasks/cut-batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
   return parseResponse<TaskRecord>(response)
 }
 

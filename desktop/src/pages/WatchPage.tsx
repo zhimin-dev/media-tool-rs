@@ -25,13 +25,21 @@ function WatchPage({
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack spacing={2}>
-        <TextField fullWidth label="m3u8 链接" value={playerUrl} onChange={(event) => onPlayerUrlChange(event.target.value)} />
+        <TextField
+          fullWidth
+          size="small"
+          label="m3u8 链接"
+          value={playerUrl}
+          onChange={(event) => onPlayerUrlChange(event.target.value)}
+        />
         <HeaderRowFields
           rows={playerHeaderRows}
           title="自定义 Header（可选）"
           keyLabel="Header 名称"
           valueLabel="Header 值"
           addLabel="添加 Header"
+          size="small"
+          buttonSize="small"
           onChange={onPlayerHeaderChange}
           onAdd={onAddPlayerHeader}
           onRemove={onRemovePlayerHeader}

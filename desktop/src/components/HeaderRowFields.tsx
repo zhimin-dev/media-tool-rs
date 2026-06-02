@@ -7,6 +7,8 @@ type HeaderRowFieldsProps = {
   keyLabel: string
   valueLabel: string
   addLabel: string
+  size?: 'small' | 'medium'
+  buttonSize?: 'small' | 'medium'
   onChange: (index: number, field: keyof HeaderRow, value: string) => void
   onAdd: () => void
   onRemove: (index: number) => void
@@ -18,6 +20,8 @@ function HeaderRowFields({
   keyLabel,
   valueLabel,
   addLabel,
+  size = 'medium',
+  buttonSize = 'medium',
   onChange,
   onAdd,
   onRemove,
@@ -29,23 +33,25 @@ function HeaderRowFields({
         <Stack key={`${index}-${row.key}`} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
           <TextField
             fullWidth
+            size={size}
             label={keyLabel}
             value={row.key}
             onChange={(event) => onChange(index, 'key', event.target.value)}
           />
           <TextField
             fullWidth
+            size={size}
             label={valueLabel}
             value={row.value}
             onChange={(event) => onChange(index, 'value', event.target.value)}
           />
-          <Button color="error" variant="outlined" onClick={() => onRemove(index)}>
+          <Button color="error" size={buttonSize} variant="outlined" onClick={() => onRemove(index)}>
             删除
           </Button>
         </Stack>
       ))}
       <Box>
-        <Button variant="text" onClick={onAdd}>
+        <Button size={buttonSize} variant="text" onClick={onAdd}>
           {addLabel}
         </Button>
       </Box>

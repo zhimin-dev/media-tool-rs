@@ -50,6 +50,7 @@ impl TaskKind {
             (TaskKind::Download, TaskPayload::Download { .. })
                 | (TaskKind::Combine, TaskPayload::Combine { .. })
                 | (TaskKind::Cut, TaskPayload::Cut { .. })
+                | (TaskKind::Cut, TaskPayload::CutBatch { .. })
         )
     }
 }
@@ -88,7 +89,22 @@ pub enum TaskPayload {
         start: u32,
         duration: u32,
         target_file_name: String,
+        #[serde(default)]
+        delete_input_file: bool,
     },
+    CutBatch {
+        input: String,
+        #[serde(default)]
+        delete_input_file: bool,
+        segments: Vec<CutSegment>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CutSegment {
+    pub start: u32,
+    pub duration: u32,
+    pub target_file_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +118,10 @@ pub struct TaskRecord {
     pub command_preview: String,
     pub message: Option<String>,
     pub result_path: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<u64>,
+    #[serde(default)]
+    pub child_task_ids: Vec<u64>,
     pub payload: TaskPayload,
 }
 
@@ -111,12 +131,23 @@ pub struct CreateTaskRequest {
     pub payload: TaskPayload,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateCutBatchRequest {
+    pub title: Option<String>,
+    pub input: String,
+    #[serde(default)]
+    pub delete_input_file: bool,
+    #[serde(default)]
+    pub segments: Vec<CutSegment>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TaskDetailResponse {
     pub task: TaskRecord,
     pub output_dir: Option<String>,
     pub output_files: Vec<String>,
     pub base_info: Option<BaseInfo>,
+    pub child_tasks: Vec<TaskRecord>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +236,10 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/tasks", web::get().to(list_tasks))
             .route("/api/tasks/{id}", web::get().to(get_task))
             .route("/api/tasks", web::post().to(create_task))
+            .route(
+                "/api/tasks/cut-batch",
+                web::post().to(create_cut_batch_task),
+            )
             .route("/api/tasks/{id}/detail", web::get().to(get_task_detail))
             .route("/api/tasks/{id}/retry", web::post().to(retry_task))
             .route(
@@ -218,7 +253,10 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
                 "/api/header-presets/{host}",
                 web::delete().to(delete_header_preset),
             )
-            .route("/api/tasks/{id}/clear-temp", web::post().to(clear_task_temp_files))
+            .route(
+                "/api/tasks/{id}/clear-temp",
+                web::post().to(clear_task_temp_files),
+            )
             .route("/api/upload-video", web::post().to(upload_video))
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
@@ -258,7 +296,10 @@ struct ListTasksQuery {
     kind: Option<TaskKind>,
 }
 
-async fn upload_video(query: web::Query<UploadVideoQuery>, mut payload: web::Payload) -> impl Responder {
+async fn upload_video(
+    query: web::Query<UploadVideoQuery>,
+    mut payload: web::Payload,
+) -> impl Responder {
     let current_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
@@ -431,6 +472,77 @@ async fn create_task(
     HttpResponse::Ok().json(task)
 }
 
+async fn create_cut_batch_task(
+    state: web::Data<AppState>,
+    request: web::Json<CreateCutBatchRequest>,
+) -> impl Responder {
+    let input = request.input.trim().to_string();
+    if input.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "输入文件不能为空",
+        }));
+    }
+    if request.segments.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "至少需要一个子任务",
+        }));
+    }
+    if request.segments.iter().any(|segment| segment.duration == 0) {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "子任务持续时长必须大于 0",
+        }));
+    }
+
+    let parent_id = state.next_id.fetch_add(1, Ordering::SeqCst);
+    let payload = TaskPayload::CutBatch {
+        input: input.clone(),
+        delete_input_file: request.delete_input_file,
+        segments: request.segments.clone(),
+    };
+    let parent_title = request
+        .title
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            Path::new(&input)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        });
+    let mut parent_task = build_task_record(parent_id, parent_title, payload.clone());
+    let child_tasks = build_cut_child_tasks(
+        parent_id,
+        input,
+        request.delete_input_file,
+        &request.segments,
+        &state,
+    );
+    parent_task.child_task_ids = child_tasks.iter().map(|task| task.id).collect();
+    parent_task.message = Some(format!(
+        "已创建 {} 个子任务，等待执行",
+        parent_task.child_task_ids.len()
+    ));
+
+    {
+        let mut tasks = state.tasks.write().await;
+        tasks.insert(parent_id, parent_task.clone());
+        for child_task in child_tasks {
+            tasks.insert(child_task.id, child_task);
+        }
+    }
+    if let Err(error) = persist_tasks(&state).await {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存任务配置失败: {}", error),
+        }));
+    }
+
+    let background_state = state.get_ref().clone();
+    tokio::spawn(async move {
+        execute_task(background_state, parent_id, payload).await;
+    });
+
+    HttpResponse::Ok().json(parent_task)
+}
+
 async fn get_task_detail(path: web::Path<u64>, state: web::Data<AppState>) -> impl Responder {
     let id = path.into_inner();
     let task = {
@@ -444,6 +556,16 @@ async fn get_task_detail(path: web::Path<u64>, state: web::Data<AppState>) -> im
         }));
     };
 
+    let child_tasks = {
+        let tasks = state.tasks.read().await;
+        let mut records = task
+            .child_task_ids
+            .iter()
+            .filter_map(|child_id| tasks.get(child_id).cloned())
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+        records
+    };
     let (output_dir, output_files) = resolve_task_output_detail(&task);
     let base_info = resolve_task_directory(&task).and_then(|path| read_task_base_info(&path));
     HttpResponse::Ok().json(TaskDetailResponse {
@@ -451,6 +573,7 @@ async fn get_task_detail(path: web::Path<u64>, state: web::Data<AppState>) -> im
         output_dir,
         output_files,
         base_info,
+        child_tasks,
     })
 }
 
@@ -466,6 +589,56 @@ async fn retry_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl Re
             "message": format!("task {} not found", source_id),
         }));
     };
+
+    if let TaskPayload::CutBatch {
+        input,
+        delete_input_file,
+        segments,
+    } = source_task.payload.clone()
+    {
+        let parent_id = state.next_id.fetch_add(1, Ordering::SeqCst);
+        let payload = TaskPayload::CutBatch {
+            input: input.clone(),
+            delete_input_file,
+            segments: segments.clone(),
+        };
+        let mut parent_task = build_task_record(
+            parent_id,
+            Some(format!("{}（重试）", source_task.title)),
+            payload.clone(),
+        );
+        let child_tasks =
+            build_cut_child_tasks(parent_id, input, delete_input_file, &segments, &state);
+        parent_task.child_task_ids = child_tasks.iter().map(|task| task.id).collect();
+        parent_task.message = Some(format!(
+            "已创建 {} 个子任务，等待执行",
+            parent_task.child_task_ids.len()
+        ));
+
+        {
+            let mut tasks = state.tasks.write().await;
+            tasks.remove(&source_id);
+            for child_id in &source_task.child_task_ids {
+                tasks.remove(child_id);
+            }
+            tasks.insert(parent_id, parent_task.clone());
+            for child_task in child_tasks {
+                tasks.insert(child_task.id, child_task);
+            }
+        }
+        if let Err(error) = persist_tasks(&state).await {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": format!("保存任务配置失败: {}", error),
+            }));
+        }
+
+        let background_state = state.get_ref().clone();
+        tokio::spawn(async move {
+            execute_task(background_state, parent_id, payload).await;
+        });
+
+        return HttpResponse::Ok().json(parent_task);
+    }
 
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
     let retry_dir = resolve_task_directory(&source_task);
@@ -623,17 +796,32 @@ async fn delete_task(path: web::Path<u64>, state: web::Data<AppState>) -> impl R
         }));
     };
 
-    if let Some(target_dir) = resolve_task_directory(&task) {
-        if target_dir.exists() {
-            if let Err(error) = fs::remove_dir_all(&target_dir) {
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "message": format!("删除任务目录失败: {}", error),
-                }));
+    let related_tasks = {
+        let tasks = state.tasks.read().await;
+        let mut records = vec![task.clone()];
+        for child_id in &task.child_task_ids {
+            if let Some(child_task) = tasks.get(child_id).cloned() {
+                records.push(child_task);
             }
+        }
+        records
+    };
+
+    for related_task in &related_tasks {
+        if let Err(error) = cleanup_task_artifacts(related_task) {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": format!("删除任务文件失败: {}", error),
+            }));
         }
     }
 
-    state.tasks.write().await.remove(&id);
+    {
+        let mut tasks = state.tasks.write().await;
+        tasks.remove(&id);
+        for child_id in &task.child_task_ids {
+            tasks.remove(child_id);
+        }
+    }
     if let Err(error) = persist_tasks(&state).await {
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "message": format!("保存任务配置失败: {}", error),
@@ -688,8 +876,11 @@ async fn clear_task_temp_files(path: web::Path<u64>, state: web::Data<AppState>)
 
     match result {
         Ok(Ok(())) => HttpResponse::Ok().json(serde_json::json!({ "message": "临时文件已清理" })),
-        Ok(Err(message)) => HttpResponse::InternalServerError().json(serde_json::json!({ "message": message })),
-        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({ "message": error.to_string() })),
+        Ok(Err(message)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": message }))
+        }
+        Err(error) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "message": error.to_string() })),
     }
 }
 
@@ -841,7 +1032,13 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             start,
             duration,
             target_file_name,
-        } => run_cut_task(input, start, duration, target_file_name).await,
+            delete_input_file,
+        } => run_cut_task(input, start, duration, target_file_name, delete_input_file).await,
+        TaskPayload::CutBatch {
+            input,
+            delete_input_file,
+            segments,
+        } => run_cut_batch_task(&state, id, input, delete_input_file, segments).await,
     };
 
     if let Err(error) = update_task(&state, id, |task| {
@@ -889,6 +1086,8 @@ fn build_task_record(id: u64, title: Option<String>, payload: TaskPayload) -> Ta
         command_preview: build_command_preview(&payload),
         message: Some("任务已创建，等待执行".to_string()),
         result_path: None,
+        parent_id: None,
+        child_task_ids: Vec::new(),
         payload,
     }
 }
@@ -1035,6 +1234,7 @@ async fn run_cut_task(
     start: u32,
     duration: u32,
     target_file_name: String,
+    delete_input_file: bool,
 ) -> Result<TaskOutcome, String> {
     tokio::task::spawn_blocking(move || {
         if duration == 0 {
@@ -1057,6 +1257,9 @@ async fn run_cut_task(
         if !success {
             return Err("截取视频失败".to_string());
         }
+        if delete_input_file {
+            remove_input_file(&input)?;
+        }
         Ok(TaskOutcome {
             message: "截取完成".to_string(),
             result_path: Some(
@@ -1069,6 +1272,89 @@ async fn run_cut_task(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+async fn run_cut_batch_task(
+    state: &AppState,
+    parent_id: u64,
+    input: String,
+    delete_input_file: bool,
+    segments: Vec<CutSegment>,
+) -> Result<TaskOutcome, String> {
+    let child_task_ids = {
+        let tasks = state.tasks.read().await;
+        tasks
+            .get(&parent_id)
+            .map(|task| task.child_task_ids.clone())
+    }
+    .unwrap_or_default();
+
+    let total = segments.len();
+    let mut success_count = 0usize;
+    let mut failure_messages = Vec::new();
+
+    for (index, segment) in segments.into_iter().enumerate() {
+        let child_id = child_task_ids
+            .get(index)
+            .copied()
+            .ok_or_else(|| "子任务不存在".to_string())?;
+        update_task(state, child_id, |task| {
+            task.status = TaskStatus::Running;
+            task.started_at = Some(now());
+            task.message = Some("子任务执行中".to_string());
+        })
+        .await?;
+
+        let result = run_cut_task(
+            input.clone(),
+            segment.start,
+            segment.duration,
+            segment.target_file_name,
+            false,
+        )
+        .await;
+
+        match result {
+            Ok(outcome) => {
+                success_count += 1;
+                update_task(state, child_id, |task| {
+                    task.status = TaskStatus::Success;
+                    task.finished_at = Some(now());
+                    task.message = Some(outcome.message);
+                    task.result_path = outcome.result_path;
+                })
+                .await?;
+            }
+            Err(message) => {
+                failure_messages.push(format!("子任务 {}: {}", index + 1, message));
+                update_task(state, child_id, |task| {
+                    task.status = TaskStatus::Failed;
+                    task.finished_at = Some(now());
+                    task.message = Some(message);
+                    task.result_path = None;
+                })
+                .await?;
+            }
+        }
+    }
+
+    if !failure_messages.is_empty() {
+        return Err(format!(
+            "完成 {}/{} 个子任务，{}",
+            success_count,
+            total,
+            failure_messages.join("；")
+        ));
+    }
+
+    if delete_input_file {
+        remove_input_file(&input)?;
+    }
+
+    Ok(TaskOutcome {
+        message: format!("{} 个子任务全部完成", total),
+        result_path: None,
+    })
 }
 
 fn ensure_directory_exists(path: PathBuf) -> std::io::Result<()> {
@@ -1140,7 +1426,7 @@ fn default_title(payload: &TaskPayload) -> String {
     match payload {
         TaskPayload::Download { .. } => "下载任务".to_string(),
         TaskPayload::Combine { .. } => "合并任务".to_string(),
-        TaskPayload::Cut { .. } => "截取任务".to_string(),
+        TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => "截取任务".to_string(),
     }
 }
 
@@ -1244,6 +1530,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             start,
             duration,
             target_file_name,
+            delete_input_file,
         } => {
             let mut parts = vec![
                 "media-tool-rs cut".to_string(),
@@ -1251,11 +1538,29 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                 format!("-s={}", start),
                 format!("-d={}", duration),
             ];
+            if *delete_input_file {
+                parts.push("--delete_input_file".to_string());
+            }
             if !target_file_name.trim().is_empty() {
                 parts.push(format!(
                     "--target_file_name={}",
                     shell_double_quote(target_file_name)
                 ));
+            }
+            parts.join(" ")
+        }
+        TaskPayload::CutBatch {
+            input,
+            delete_input_file,
+            segments,
+        } => {
+            let mut parts = vec![
+                "media-tool-rs cut-batch".to_string(),
+                format!("-i={}", input),
+                format!("--segments={}", segments.len()),
+            ];
+            if *delete_input_file {
+                parts.push("--delete_input_file".to_string());
             }
             parts.join(" ")
         }
@@ -1279,7 +1584,9 @@ fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>
             .as_ref()
             .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
             .or(current_dir.clone()),
-        TaskPayload::Cut { .. } => current_dir.map(|base| base.join("static").join("cut")),
+        TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => {
+            current_dir.map(|base| base.join("static").join("cut"))
+        }
     };
 
     let files = output_dir
@@ -1308,6 +1615,48 @@ fn read_directory_entries(path: &PathBuf) -> Vec<String> {
         .collect::<Vec<_>>();
     names.sort();
     names
+}
+
+fn build_cut_child_tasks(
+    parent_id: u64,
+    input: String,
+    _delete_input_file: bool,
+    segments: &[CutSegment],
+    state: &web::Data<AppState>,
+) -> Vec<TaskRecord> {
+    segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            let child_id = state.next_id.fetch_add(1, Ordering::SeqCst);
+            let mut task = build_task_record(
+                child_id,
+                Some(build_cut_child_title(index, segment)),
+                TaskPayload::Cut {
+                    input: input.clone(),
+                    start: segment.start,
+                    duration: segment.duration,
+                    target_file_name: segment.target_file_name.clone(),
+                    delete_input_file: false,
+                },
+            );
+            task.parent_id = Some(parent_id);
+            task.message = Some("等待父任务调度".to_string());
+            task
+        })
+        .collect()
+}
+
+fn build_cut_child_title(index: usize, segment: &CutSegment) -> String {
+    if !segment.target_file_name.trim().is_empty() {
+        return segment.target_file_name.clone();
+    }
+    format!(
+        "片段 {}（{}s-{}s）",
+        index + 1,
+        segment.start,
+        segment.start + segment.duration
+    )
 }
 
 fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
@@ -1410,6 +1759,8 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
                     "任务未完成，可重试".to_string()
                 }),
                 result_path,
+                parent_id: None,
+                child_task_ids: Vec::new(),
                 payload,
             },
         );
@@ -1422,7 +1773,7 @@ fn task_kind_from_payload(payload: &TaskPayload) -> TaskKind {
     match payload {
         TaskPayload::Download { .. } => TaskKind::Download,
         TaskPayload::Combine { .. } => TaskKind::Combine,
-        TaskPayload::Cut { .. } => TaskKind::Cut,
+        TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => TaskKind::Cut,
     }
 }
 
@@ -1490,6 +1841,23 @@ async fn persist_tasks(state: &web::Data<AppState>) -> Result<(), String> {
     write_tasks_to_config(&state.tasks_config_dir, &tasks).map_err(|error| error.to_string())
 }
 
+fn cleanup_task_artifacts(task: &TaskRecord) -> std::io::Result<()> {
+    if let Some(target_dir) = resolve_task_directory(task) {
+        if target_dir.exists() {
+            fs::remove_dir_all(target_dir)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(result_path) = &task.result_path {
+        let path = PathBuf::from(result_path);
+        if path.exists() && path.is_file() {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
 fn read_task_base_info(folder_path: &PathBuf) -> Option<BaseInfo> {
     let base_info_path = folder_path.join("base_info.json");
     let content = fs::read_to_string(base_info_path).ok()?;
@@ -1513,6 +1881,14 @@ fn detect_result_video(folder_path: &PathBuf) -> Option<String> {
         .collect::<Vec<_>>();
     files.sort();
     files.last().map(|path| path.display().to_string())
+}
+
+fn remove_input_file(input: &str) -> Result<(), String> {
+    let path = PathBuf::from(input);
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::remove_file(&path).map_err(|error| format!("删除输入文件失败: {}", error))
 }
 
 fn resolve_task_directory(task: &TaskRecord) -> Option<PathBuf> {
