@@ -56,10 +56,16 @@ pub struct BaseInfo {
     pub ffmpeg_download: bool,
     #[serde(default = "default_auto_clear_temp_files")]
     pub auto_clear_temp_files: bool,
+    #[serde(default = "default_combine_retry_count")]
+    pub combine_retry_count: i32,
 }
 
 fn default_auto_clear_temp_files() -> bool {
     true
+}
+
+fn default_combine_retry_count() -> i32 {
+    3
 }
 
 impl BaseInfo {
@@ -74,6 +80,7 @@ impl BaseInfo {
             download_dir: "static/download".to_string(),
             ffmpeg_download: false,
             auto_clear_temp_files: true,
+            combine_retry_count: 3,
         }
     }
     pub fn set_host(&mut self, url: String) {
@@ -112,6 +119,10 @@ impl BaseInfo {
         self.auto_clear_temp_files = auto_clear_temp_files
     }
 
+    pub fn set_combine_retry_count(&mut self, combine_retry_count: i32) {
+        self.combine_retry_count = combine_retry_count
+    }
+
     pub fn generate(self, folder: String) -> Result<(), Error> {
         let data = serde_json::to_vec(&self)?;
         Ok(std::fs::write(folder, &data)?)
@@ -140,7 +151,7 @@ fn file_exists(file_name: String) -> bool {
 }
 
 pub mod download {
-    use crate::cmd::cmd::check_video_validity;
+    use crate::cmd::cmd::{check_video_validity, get_video_duration_secs};
     use crate::combine::parse::handle_combine_ts;
     use crate::common::{is_url, now, replace_last_segment};
     use crate::download::{
@@ -162,6 +173,7 @@ pub mod download {
         download_dir: String,
         ffmpeg_download: bool,
         auto_clear_temp_files: bool,
+        combine_retry_count: i32,
     ) -> Result<bool, Error> {
         let mut hls_m3u;
         let mut url = pass_url;
@@ -193,6 +205,7 @@ pub mod download {
         base_info_obj.set_download_dir(download_dir);
         base_info_obj.set_ffmpeg_download(ffmpeg_download);
         base_info_obj.set_auto_clear_temp_files(auto_clear_temp_files);
+        base_info_obj.set_combine_retry_count(combine_retry_count);
         let _ = base_info_obj.generate(base_info.to_string());
         if file_exists(m3u8_file_name.clone()) {
             println!("now is read local m3u8 files");
@@ -296,20 +309,76 @@ pub mod download {
             Some(last) => last as i32,
             None => -1,
         };
-        let res = handle_combine_ts(
-            String::from(format!("(.*).{}", hls_m3u.extension)),
-            start,
-            end,
-            file_name.clone(),
-            hls_m3u.method,
-            folder.clone(),
-            hls_m3u.iv,
-            hls_m3u.sequence,
-            hls_m3u.x_map_uri.clone(),
-            hls_m3u.extension.clone(),
-        )
-        .await?;
-        return if res {
+        let m3u8_total_duration = hls_m3u.total_duration;
+        let max_retries = if combine_retry_count > 0 { combine_retry_count } else { 3 };
+        let mut attempt = 0;
+        let res = loop {
+            let combine_result = handle_combine_ts(
+                String::from(format!("(.*).{}", hls_m3u.extension)),
+                start,
+                end,
+                file_name.clone(),
+                hls_m3u.method.as_ref().map(|m| match m {
+                    crate::m3u8::HlsM3u8Method::Aes128 => crate::m3u8::HlsM3u8Method::Aes128,
+                    crate::m3u8::HlsM3u8Method::SampleAes => crate::m3u8::HlsM3u8Method::SampleAes,
+                }),
+                folder.clone(),
+                hls_m3u.iv.clone(),
+                hls_m3u.sequence,
+                hls_m3u.x_map_uri.clone(),
+                hls_m3u.extension.clone(),
+            )
+            .await;
+            attempt += 1;
+            match combine_result {
+                Ok(true) => {
+                    // 如果 m3u8 有时长信息，校验合并后视频时长
+                    if m3u8_total_duration > 0.0 {
+                        let output_duration = get_video_duration_secs(&file_name);
+                        match output_duration {
+                            Some(actual) => {
+                                let diff = (actual - m3u8_total_duration).abs();
+                                // 允许 3 秒误差
+                                if diff <= 3.0 {
+                                    println!(
+                                        "合并完成，时长校验通过：实际 {:.1}s，预期 {:.1}s",
+                                        actual, m3u8_total_duration
+                                    );
+                                    break Ok(true);
+                                } else {
+                                    println!(
+                                        "合并时长不一致（实际 {:.1}s，预期 {:.1}s），第 {} 次重试",
+                                        actual, m3u8_total_duration, attempt
+                                    );
+                                    if attempt >= max_retries {
+                                        println!("已达最大重试次数 {}，合并失败", max_retries);
+                                        break Ok(false);
+                                    }
+                                    // 删除输出文件后重试
+                                    let _ = std::fs::remove_file(&file_name);
+                                }
+                            }
+                            None => {
+                                // 无法获取时长，视为成功
+                                break Ok(true);
+                            }
+                        }
+                    } else {
+                        break Ok(true);
+                    }
+                }
+                Ok(false) => {
+                    println!("合并失败，第 {} 次重试", attempt);
+                    if attempt >= max_retries {
+                        println!("已达最大重试次数 {}，合并失败", max_retries);
+                        break Ok(false);
+                    }
+                    let _ = std::fs::remove_file(&file_name);
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        return if res? {
             let f_name = format!("{}", file_name.clone());
             println!("---f_name {}", f_name.clone());
             check_video_validity(f_name.as_str())

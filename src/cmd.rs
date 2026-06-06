@@ -273,6 +273,24 @@ pub mod cmd {
         Ok(stderr.trim().is_empty())
     }
 
+    pub fn get_video_duration_secs(file: &str) -> Option<f64> {
+        let output = Command::new("ffprobe")
+            .args(&[
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(file)
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let s = String::from_utf8_lossy(&output.stdout);
+            s.trim().parse::<f64>().ok()
+        } else {
+            None
+        }
+    }
+
     pub fn get_video_info(file: &str) -> Option<VideoInfo> {
         println!("pass file name： {}---", file);
         let mut ffprobe = Command::new("ffprobe");

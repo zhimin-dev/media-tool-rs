@@ -197,6 +197,17 @@ function CreateTaskDialog({
               }
               slotProps={{ htmlInput: { min: 1 } }}
             />
+            <TextField
+              fullWidth
+              label="合并重试次数"
+              type="number"
+              value={downloadForm.combine_retry_count}
+              onChange={(event) =>
+                onDownloadFormChange((current) => ({ ...current, combine_retry_count: Number(event.target.value) }))
+              }
+              slotProps={{ htmlInput: { min: 1 } }}
+              helperText="合并视频后若时长不符则重试，默认 3 次"
+            />
             <FormControlLabel
               control={
                 <Switch

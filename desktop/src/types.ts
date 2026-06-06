@@ -8,6 +8,7 @@ export type DownloadPayload = {
   concurrent: number
   download_dir: string
   headers: Record<string, string>
+  combine_retry_count: number
 }
 
 export type CombinePayload = {
@@ -95,6 +96,7 @@ export type BaseInfo = {
   download_dir: string
   ffmpeg_download: boolean
   auto_clear_temp_files: boolean
+  combine_retry_count: number
 }
 
 export type HeaderRow = {

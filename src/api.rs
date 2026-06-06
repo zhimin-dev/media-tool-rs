@@ -69,6 +69,8 @@ pub enum TaskPayload {
         download_dir: String,
         #[serde(default)]
         headers: HashMap<String, String>,
+        #[serde(default = "default_combine_retry_count")]
+        combine_retry_count: i32,
     },
     Combine {
         #[serde(default)]
@@ -167,12 +169,17 @@ pub struct UpdateTaskBaseInfoRequest {
     pub ffmpeg_download: bool,
     #[serde(default = "default_auto_clear_temp_files")]
     pub auto_clear_temp_files: bool,
+    #[serde(default = "default_combine_retry_count")]
+    pub combine_retry_count: i32,
 }
 
 fn default_auto_clear_temp_files() -> bool {
     true
 }
 
+fn default_combine_retry_count() -> i32 {
+    3
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeaderPreset {
     pub host: String,
@@ -727,6 +734,7 @@ async fn update_task_base_info(
         download_dir: download_dir.clone(),
         ffmpeg_download: request.ffmpeg_download,
         auto_clear_temp_files: request.auto_clear_temp_files,
+        combine_retry_count: request.combine_retry_count,
     };
 
     let current_dir = match env::current_dir() {
@@ -759,6 +767,7 @@ async fn update_task_base_info(
             concurrent: base_info.concurrent,
             download_dir: base_info.download_dir.clone(),
             headers: base_info.header.clone(),
+            combine_retry_count: base_info.combine_retry_count,
         };
         record.command_preview = build_command_preview(&record.payload);
         record.message = Some("base_info.json 已更新，可重试".to_string());
@@ -986,6 +995,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             concurrent,
             download_dir,
             headers,
+            combine_retry_count,
         } => {
             run_download_task(
                 url,
@@ -996,6 +1006,7 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
                 concurrent,
                 download_dir,
                 headers,
+                combine_retry_count,
             )
             .await
         }
@@ -1101,6 +1112,7 @@ async fn run_download_task(
     concurrent: i32,
     download_dir: String,
     headers: HashMap<String, String>,
+    combine_retry_count: i32,
 ) -> Result<TaskOutcome, String> {
     let current_dir = env::current_dir().map_err(|error| error.to_string())?;
     ensure_directory_exists(current_dir.join(&download_dir)).map_err(|error| error.to_string())?;
@@ -1126,6 +1138,7 @@ async fn run_download_task(
         download_dir: download_dir.clone(),
         ffmpeg_download: ffmpeg_download_mode,
         auto_clear_temp_files,
+        combine_retry_count,
     };
     write_base_info(
         &current_dir.join(relative_folder.trim_start_matches("./")),
@@ -1147,6 +1160,7 @@ async fn run_download_task(
             download_dir.clone(),
             ffmpeg_download_mode,
             auto_clear_temp_files,
+            combine_retry_count,
         )
         .await
         .map_err(|_| "下载失败".to_string());
@@ -1441,6 +1455,7 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             concurrent,
             download_dir,
             headers,
+            combine_retry_count,
         } => {
             let mut parts = vec!["media-tool-rs download".to_string()];
             if !url.trim().is_empty() {
@@ -1472,6 +1487,9 @@ fn build_command_preview(payload: &TaskPayload) -> String {
                     "--header={}",
                     shell_single_quote(&serialize_headers(headers))
                 ));
+            }
+            if *combine_retry_count != 3 {
+                parts.push(format!("--combine_retry_count={}", combine_retry_count));
             }
             parts.join(" ")
         }
@@ -1691,6 +1709,7 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
             download_dir: "static/download".to_string(),
             ffmpeg_download: false,
             auto_clear_temp_files: true,
+            combine_retry_count: 3,
         });
         let result_path = detect_result_video(&folder_path);
         let timestamp = folder_path
@@ -1728,6 +1747,11 @@ fn load_download_tasks(download_root: PathBuf) -> HashMap<u64, TaskRecord> {
                 base_info.download_dir.clone()
             },
             headers: normalize_headers(base_info.header),
+            combine_retry_count: if base_info.combine_retry_count > 0 {
+                base_info.combine_retry_count
+            } else {
+                3
+            },
         };
         let status = if result_path.is_some() {
             TaskStatus::Success
@@ -1917,6 +1941,7 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
             target_file_name,
             concurrent,
             headers,
+            combine_retry_count,
         } => {
             let base_info = task_dir.and_then(|path| read_task_base_info(&path));
             if let Some(info) = base_info {
@@ -1949,6 +1974,11 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
                     } else {
                         normalize_headers(info.header)
                     },
+                    combine_retry_count: if info.combine_retry_count > 0 {
+                        info.combine_retry_count
+                    } else {
+                        combine_retry_count
+                    },
                 }
             } else {
                 TaskPayload::Download {
@@ -1960,6 +1990,7 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
                     concurrent,
                     download_dir,
                     headers,
+                    combine_retry_count,
                 }
             }
         }
