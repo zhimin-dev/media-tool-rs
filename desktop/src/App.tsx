@@ -8,6 +8,7 @@ import {
   deleteHeaderPreset,
   deleteTask,
   fetchHeaderPresets,
+  getApiConnectionStatus,
   fetchTaskDetail,
   fetchTasks,
   retryTask,
@@ -117,6 +118,19 @@ function App() {
   const [presetFormRows, setPresetFormRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
   const [editingPresetHost, setEditingPresetHost] = useState('')
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
+  const [apiStatusText, setApiStatusText] = useState('API: checking...')
+  const [apiHealthy, setApiHealthy] = useState<boolean | null>(null)
+
+  const updateApiStatus = async () => {
+    const status = await getApiConnectionStatus()
+    setApiHealthy(status.healthy)
+    setApiStatusText(
+      status.healthy
+        ? `API: connected (${status.apiBase})`
+        : `API: disconnected (${status.apiBase}) - ${status.message}`,
+    )
+    return status
+  }
 
   useEffect(() => {
     let alive = true
@@ -124,13 +138,16 @@ function App() {
     const loadTasks = async () => {
       try {
         const records = await fetchTasks(currentTaskPage)
+        void updateApiStatus()
         if (alive) {
           setTasks(records)
           setError('')
         }
-      } catch {
+      } catch (requestError) {
+        const status = await updateApiStatus()
+        const message = requestError instanceof Error ? requestError.message : 'unknown error'
         if (alive) {
-          setError('无法连接后端接口，请先执行 media-tool-rs serve --port 8080')
+          setError(`无法连接后端接口：${message}（${status.apiBase}）`)
         }
       }
     }
@@ -146,10 +163,13 @@ function App() {
   const handleManualRefresh = async () => {
     try {
       const records = await fetchTasks(currentTaskPage)
+      void updateApiStatus()
       setTasks(records)
       setError('')
-    } catch {
-      setError('无法连接后端接口，请先执行 media-tool-rs serve --port 8080')
+    } catch (requestError) {
+      const status = await updateApiStatus()
+      const message = requestError instanceof Error ? requestError.message : 'unknown error'
+      setError(`无法连接后端接口：${message}（${status.apiBase}）`)
     }
   }
 
@@ -172,6 +192,28 @@ function App() {
     void loadHeaderPresets()
     return () => {
       alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    const refreshApiStatus = async () => {
+      const status = await getApiConnectionStatus()
+      if (!alive) {
+        return
+      }
+      setApiHealthy(status.healthy)
+      setApiStatusText(
+        status.healthy
+          ? `API: connected (${status.apiBase})`
+          : `API: disconnected (${status.apiBase}) - ${status.message}`,
+      )
+    }
+    void refreshApiStatus()
+    const timer = window.setInterval(() => void refreshApiStatus(), 3000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
     }
   }, [])
 
@@ -501,6 +543,7 @@ function App() {
 
       <Container maxWidth="lg" sx={{ py: 3 }}>
         <Stack spacing={2}>
+          <Alert severity={apiHealthy === false ? 'warning' : 'info'}>{apiStatusText}</Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {successMessage ? <Alert severity="success">{successMessage}</Alert> : null}
 

@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { internalIpV4 } from 'internal-ip'
 
 const mobile = /android|ios/.test(process.env.TAURI_ENV_PLATFORM ?? '')
+const serverTarget = process.env.MEDIA_TOOL_SERVER_URL ?? 'http://127.0.0.1:8080'
+const strictPort = process.env.MEDIA_TOOL_STRICT_PORT === 'true'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,7 +13,7 @@ export default defineConfig({
   clearScreen: false,
   server: {
     port: 5173,
-    strictPort: true,
+    strictPort,
     host: '0.0.0.0',
     hmr: mobile
       ? {
@@ -26,11 +28,11 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: serverTarget,
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://127.0.0.1:8080',
+        target: serverTarget,
         changeOrigin: true,
       },
     },

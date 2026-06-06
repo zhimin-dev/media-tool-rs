@@ -3,6 +3,7 @@ use crate::combine::parse::{combine_video, get_reg_files, to_files};
 use crate::common::now;
 use crate::download::download::{create_folder, fast_download, get_file_name};
 use crate::download::BaseInfo;
+use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use futures_util::StreamExt;
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -231,12 +233,19 @@ struct TaskOutcome {
 }
 
 pub async fn run_server(port: u16) -> std::io::Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", port))?;
+    let addr = listener.local_addr()?;
+    let actual_port = addr.port();
     let state = web::Data::new(AppState::new());
+    write_runtime_server_info(actual_port);
 
-    println!("media-tool-rs ui api is running at http://127.0.0.1:{port}");
+    println!(
+        "media-tool-rs ui api is running at http://127.0.0.1:{actual_port}"
+    );
 
     HttpServer::new(move || {
         App::new()
+            .wrap(Cors::permissive())
             .app_data(state.clone())
             .app_data(web::PayloadConfig::new(1024 * 1024 * 1024))
             .route("/api/health", web::get().to(health))
@@ -268,9 +277,40 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
     })
-    .bind(("127.0.0.1", port))?
+    .listen(listener)?
     .run()
     .await
+}
+
+fn write_runtime_server_info(port: u16) {
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            println!("failed to resolve current dir for runtime server info: {}", error);
+            return;
+        }
+    };
+
+    let runtime_dir = current_dir.join("config").join("runtime");
+    if let Err(error) = fs::create_dir_all(&runtime_dir) {
+        println!("failed to create runtime config dir: {}", error);
+        return;
+    }
+
+    let server_info_path = runtime_dir.join("server-info.json");
+    let payload = serde_json::json!({
+        "host": "127.0.0.1",
+        "port": port,
+        "api_base": format!("http://127.0.0.1:{}/api", port),
+        "static_base": format!("http://127.0.0.1:{}/static", port),
+    });
+    if let Err(error) = fs::write(&server_info_path, payload.to_string()) {
+        println!(
+            "failed to write runtime server info to {}: {}",
+            server_info_path.display(),
+            error
+        );
+    }
 }
 
 async fn health() -> impl Responder {

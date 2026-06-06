@@ -54,7 +54,7 @@ media-tool-rs cut -i=/your/local/file.mp4 -s=5 -d=10
 在项目根目录执行：
 
 ```bash
-cargo run -- serve --port=8080
+cargo run -- serve --port=0
 ```
 
 这会启动可视化界面所需的任务接口，支持：
@@ -70,17 +70,36 @@ cargo run -- serve --port=8080
 ```bash
 cd desktop
 npm install
-npm run dev
+npm run dev:with-server
 # 或者使用 npm run tauri dev
 ```
 
-默认开发地址是 `http://127.0.0.1:5173`，Vite 已代理 `/api` 到 `http://127.0.0.1:8080`。
+默认开发地址是 `http://127.0.0.1:5173`，Vite 会把 `/api` 与 `/static` 代理到后端实际启动地址。
+
+> 推荐使用 `npm run dev:with-server`，它会自动：
+>
+> - 启动后端 `cargo run -- serve --port 0`（随机空闲端口）
+> - 读取后端实际端口
+> - 注入给 Vite 代理（`/api` 与 `/static`）
+> - 如 5173 被占用，浏览器开发会自动切换到下一个可用端口
+>
+> 如需调整后端地址检测超时（默认 120 秒），可这样启动：
+>
+> ```bash
+> MEDIA_TOOL_DETECT_TIMEOUT_MS=180000 npm run dev:with-server
+> ```
 
 如果使用 `npm run tauri dev`：
 
 - 请确保在 `desktop` 目录执行命令；
+- 已自动执行 `npm run dev:with-server:tauri`，固定使用 5173 以匹配 Tauri `devUrl`；
 - 首次运行会编译 `desktop/src-tauri`（已初始化）；
 - Linux 需要先安装 GTK/WebKit 相关系统依赖（例如 `glib-2.0`、`webkit2gtk`、`libsoup3` 等），否则会出现 `glib-2.0.pc not found` 之类报错。
+
+### 2.1 打包后（tauri build）说明
+
+- 应用启动时会在后台自动启动本地 API 服务：`http://127.0.0.1:8080/api`
+- 前端会在 Tauri 运行时自动读取该地址，无需依赖 Vite 代理
 
 ### 3. 前端能力
 

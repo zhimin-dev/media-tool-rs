@@ -11,6 +11,7 @@ tempfile = "3.26.0"
 url = "2.5.8"
 actix-web = { version = "4.13.0", default-features = false, features = ["macros", "compress-gzip", "compress-brotli"] }
 actix-files = "0.6"
+actix-cors = "0.7"
 reqwest = { version = "0.13.2", features = ["json"] }
 tokio = { version = "1.49.0", features = ["full"] }
 futures-util = "0.3.31"

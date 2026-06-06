@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:with-server": "node ./scripts/dev-with-server.mjs",
+    "dev:with-server:tauri": "MEDIA_TOOL_STRICT_PORT=true node ./scripts/dev-with-server.mjs",
     "tauri": "tauri",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.0.1",
