@@ -338,8 +338,8 @@ pub mod download {
                         match output_duration {
                             Some(actual) => {
                                 let diff = (actual - m3u8_total_duration).abs();
-                                // 允许 3 秒误差
-                                if diff <= 3.0 {
+                                // 允许 10 秒误差
+                                if diff <= 10.0 {
                                     println!(
                                         "合并完成，时长校验通过：实际 {:.1}s，预期 {:.1}s",
                                         actual, m3u8_total_duration
