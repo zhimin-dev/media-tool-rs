@@ -61,13 +61,14 @@ function CreateTaskDialog({
   const [testFiles, setTestFiles] = useState<string[]>([])
   const [combineUploadLoading, setCombineUploadLoading] = useState(false)
   const [combineUploadError, setCombineUploadError] = useState('')
-  const [combineUploadSubDir] = useState(() => `combine/${generateRandomString(12)}`)
+  const [combineUploadSubDir] = useState(() => generateRandomString(12))
 
   // Derive tested: true only when the snapshot matches the current form values
   const formKey = [
     combineForm.reg_name,
     combineForm.reg_name_start,
     combineForm.reg_name_end,
+    combineForm.target_file_name,
     combineForm.inputs.join('|'),
   ].join('|')
   const combineTested = testedKey !== null && testedKey === formKey
@@ -82,7 +83,9 @@ function CreateTaskDialog({
       const uploadedFiles = await Promise.all(
         files.map((file) =>
           uploadVideo(file, {
+            rootDir: 'cut',
             subDir: combineUploadSubDir,
+            preserveFileName: true,
           }),
         ),
       )
@@ -102,6 +105,12 @@ function CreateTaskDialog({
   }
 
   const handleCombineTest = () => {
+    if (!combineForm.target_file_name.trim()) {
+      onCombineFormChange((current) => ({
+        ...current,
+        target_file_name: generateRandomFileName(12),
+      }))
+    }
     const files =
       combineForm.inputs.length > 0
         ? combineForm.inputs
@@ -245,7 +254,7 @@ function CreateTaskDialog({
             </Stack>
             {combineUploadSubDir ? (
               <Typography variant="body2" color="text.secondary">
-               本次任务上传目录：static/uploads/{combineUploadSubDir}
+               本次任务上传目录：static/cut/{combineUploadSubDir}
               </Typography>
             ) : null}
             {combineForm.inputs.length > 0 ? (
@@ -388,4 +397,8 @@ function generateRandomString(length: number) {
     result += chars[Math.floor(Math.random() * chars.length)]
   }
   return result
+}
+
+function generateRandomFileName(length: number) {
+  return generateRandomString(length)
 }

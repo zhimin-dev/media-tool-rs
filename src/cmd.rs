@@ -173,8 +173,11 @@ pub mod cmd {
     pub fn combine(file: String, target: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
         let output = Command::new("ffmpeg")
+            .arg("-y")
             .arg("-f")
             .arg("concat")
+            .arg("-safe")
+            .arg("0")
             .arg("-i")
             .arg(file)
             .arg("-c")

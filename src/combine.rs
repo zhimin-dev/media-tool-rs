@@ -7,9 +7,11 @@ pub mod parse {
     use image::EncodableLayout;
     use openssl::symm::{decrypt, Cipher};
     use std::fmt::Error;
-    use std::fs::{read, File, OpenOptions};
+    use std::fs::{self, read, File, OpenOptions};
     use std::io::prelude::*;
     use std::io::{BufReader, BufWriter};
+    use std::path::Path;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     pub fn get_reg_files(
@@ -26,7 +28,29 @@ pub mod parse {
     }
 
     pub fn get_reg_file_name(reg_name: String) -> String {
-        return reg_name.replace("(.*)", "");
+        let path = Path::new(reg_name.as_str());
+        if let Some(parent_name) = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+        {
+            if !parent_name.trim().is_empty() {
+                return parent_name.to_string();
+            }
+        }
+
+        let cleaned = reg_name.replace("(.*)", "");
+        let candidate = Path::new(cleaned.as_str())
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(cleaned.as_str())
+            .trim_matches('/');
+
+        if candidate.is_empty() || candidate == ".mp4" {
+            now().to_string()
+        } else {
+            candidate.to_string()
+        }
     }
 
     fn get_temp_file() -> String {
@@ -38,19 +62,44 @@ pub mod parse {
         return String::default();
     }
 
-    pub fn to_files() -> Result<String, Error> {
-        // let file = get_temp_file();
-        let file = format!("{}.txt", now());
-        Ok(file)
+    pub fn to_files(base_dir: &Path) -> Result<String, Error> {
+        if let Err(error) = fs::create_dir_all(base_dir) {
+            println!("创建目录失败 {}: {}", base_dir.display(), error);
+            return Ok(format!("{}.txt", now()));
+        }
+        let file = base_dir.join(format!("{}.txt", now()));
+        Ok(file.display().to_string())
     }
 
     pub fn white_to_files(files: Vec<String>, file_name: String) -> Result<bool, Error> {
         println!("{}", file_name.clone());
-        let mut file = File::create(file_name).expect("无法创建文件");
+        let file_path = Path::new(file_name.as_str());
+        if let Some(parent) = file_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(error) = fs::create_dir_all(parent) {
+                    println!("无法创建目录 {}: {}", parent.display(), error);
+                    return Ok(false);
+                }
+            }
+        }
+
+        let mut file = match File::create(file_name.as_str()) {
+            Ok(file) => file,
+            Err(error) => {
+                println!("无法创建文件 {}: {}", file_name, error);
+                return Ok(false);
+            }
+        };
         for num in files {
             let str = format!("file \'{}\'", num);
-            file.write_all(str.as_bytes()).expect("写入文件失败");
-            file.write_all(b"\n").expect("写入文件失败");
+            if let Err(error) = file.write_all(str.as_bytes()) {
+                println!("写入文件失败 {}: {}", file_name, error);
+                return Ok(false);
+            }
+            if let Err(error) = file.write_all(b"\n") {
+                println!("写入文件失败 {}: {}", file_name, error);
+                return Ok(false);
+            }
         }
         Ok(true)
     }
@@ -59,6 +108,7 @@ pub mod parse {
         files: Vec<String>,
         file_name: String,
         target_file_name: String,
+        source_dir: PathBuf,
         same_param_index: i32,
         set_a_b: i32,
         set_v_b: i32,
@@ -66,6 +116,11 @@ pub mod parse {
         set_width: i32,
         set_height: i32,
     ) -> Result<bool, Error> {
+        if let Err(error) = fs::create_dir_all(&source_dir) {
+            println!("创建目录失败 {}: {}", source_dir.display(), error);
+            return Ok(false);
+        }
+
         if same_param_index == -1
             && set_a_b == 0
             && set_v_b == 0
@@ -73,8 +128,12 @@ pub mod parse {
             && set_width == 0
             && set_height == 0
         {
-            white_to_files(files.clone(), file_name.clone()).expect("写入文件失败");
-            return combine(file_name.clone(), target_file_name);
+            let wrote = white_to_files(files.clone(), file_name.clone()).unwrap_or(false);
+            if !wrote {
+                return Ok(false);
+            }
+            let target = resolve_output_path(&source_dir, target_file_name);
+            return combine(file_name.clone(), target);
         }
         // 如果不指定视频参数相同的索引，那么就按照传过来的参数处理
         let mut a_b = 128000; // audio bitrate
@@ -125,10 +184,12 @@ pub mod parse {
             "ab {} vb {}  fps {} width {} height {}",
             a_b, v_b, fps, width, height
         );
+        let target = resolve_output_path(&source_dir, target_file_name);
         transcode_videos_to_same_params(
             files.clone(),
             file_name.clone(),
-            target_file_name,
+            target,
+            source_dir,
             a_b,
             v_b,
             fps,
@@ -142,6 +203,7 @@ pub mod parse {
         files: Vec<String>,
         file: String,
         target: String,
+        source_dir: PathBuf,
         a_b: i32,
         v_b: i32,
         fps: i32,
@@ -152,7 +214,10 @@ pub mod parse {
         let mut result_files = vec![];
         // 先将ts文件转成mp4
         for i in files.clone() {
-            let file_name = format!("_temp_{}.mp4", index);
+            let file_name = source_dir
+                .join(format!("_temp_{}.mp4", index))
+                .display()
+                .to_string();
             result_files.push(file_name.clone());
             let _ = transcode_video_to_spec_params(
                 i.clone(),
@@ -190,7 +255,10 @@ pub mod parse {
         target: String,
     ) -> Result<bool, Error> {
         println!("file {}, target {}", file.clone(), target.clone());
-        white_to_files(mp4_files.clone(), file.clone()).expect("写入文件失败");
+        let wrote = white_to_files(mp4_files.clone(), file.clone()).unwrap_or(false);
+        if !wrote {
+            return Ok(false);
+        }
         combine(file.clone(), target)
     }
 
@@ -199,16 +267,18 @@ pub mod parse {
         reg_start: i32,
         reg_end: i32,
         target_name: String,
+        source_dir: PathBuf,
     ) -> Result<bool, Error> {
         let files = get_reg_files(reg_name.clone(), reg_start, reg_end).expect("解析失败");
-        let file_name = to_files().expect("生成文件失败");
-        let mut target = String::default();
-        if target_name.is_empty() {
-            target = format!("{}", get_reg_file_name(reg_name.to_owned()));
-        } else {
-            target = format!("{}", target_name.clone());
+        let file_name = to_files(&source_dir).expect("生成文件失败");
+        let mut target = source_dir.join(get_reg_file_name(reg_name.to_owned())).display().to_string();
+        if !target_name.is_empty() {
+            target = resolve_output_path(&source_dir, target_name.clone());
         }
-        white_to_files(files.clone(), file_name.clone()).expect("写入文件失败");
+        let wrote = white_to_files(files.clone(), file_name.clone()).unwrap_or(false);
+        if !wrote {
+            return Ok(false);
+        }
         let res = combine_ts(file_name.clone(), target).expect("合并文件失败");
         Ok(res)
     }
@@ -256,6 +326,7 @@ pub mod parse {
         iv: String,
         sequence: i32,
         extension: String,
+        source_dir: PathBuf,
     ) -> Result<bool, Error> {
         let key_file = format!("./{}.bin", key.clone());
         println!("pass key {}, iv {}", key_file.clone(), iv.clone());
@@ -275,6 +346,7 @@ pub mod parse {
             reg_start,
             reg_end,
             target_name,
+            source_dir,
         )
         .await;
     }
@@ -296,13 +368,14 @@ pub mod parse {
         target_name: String,
         x_map_uri: String,
         extension: String,
+        source_dir: PathBuf,
     ) -> Result<bool, Error> {
         // 输出文件，覆盖或创建新文件
         let output_file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(target_name.clone())
+            .open(resolve_output_path(&source_dir, target_name.clone()))
             .expect("create file error");
 
         let mut writer = BufWriter::new(output_file);
@@ -363,6 +436,7 @@ pub mod parse {
         sequence: i32,
         x_map_uri: String,
         extension: String,
+        source_dir: PathBuf,
     ) -> Result<bool, Error> {
         if !x_map_uri.is_empty() {
             return m4s_file_combine(
@@ -372,6 +446,7 @@ pub mod parse {
                 target_name.clone(),
                 x_map_uri.clone(),
                 extension.clone(),
+                source_dir,
             );
         }
         match method {
@@ -385,6 +460,7 @@ pub mod parse {
                     iv.clone(),
                     sequence,
                     extension.clone(),
+                    source_dir,
                 )
                 .await
             }
@@ -403,8 +479,17 @@ pub mod parse {
             }
             None => {
                 println!("no crypto");
-                combine_without_crypto(reg_name, reg_start, reg_end, target_name).await
+                combine_without_crypto(reg_name, reg_start, reg_end, target_name, source_dir).await
             }
         }
+    }
+
+    fn resolve_output_path(base_dir: &Path, target_name: String) -> String {
+        let candidate = Path::new(target_name.as_str());
+        if candidate.is_absolute() {
+            return target_name;
+        }
+
+        base_dir.join(candidate).display().to_string()
     }
 }

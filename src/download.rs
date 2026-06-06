@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, Read};
+use std::path::PathBuf;
 use tokio::runtime::Runtime;
 
 struct VideoTs {
@@ -163,6 +164,7 @@ pub mod download {
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use std::{fs, io};
+    use std::path::PathBuf;
 
     pub async fn fast_download(
         pass_url: String,
@@ -327,6 +329,7 @@ pub mod download {
                 hls_m3u.sequence,
                 hls_m3u.x_map_uri.clone(),
                 hls_m3u.extension.clone(),
+                PathBuf::from(folder.clone()),
             )
             .await;
             attempt += 1;

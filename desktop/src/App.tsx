@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   type ApiConnectionStatus,
+  clearCombineUnusedFiles,
   createTask,
   clearTaskTempFiles,
   deleteHeaderPreset,
@@ -424,6 +425,17 @@ function App() {
     }
   }
 
+  const handleClearCombineUnusedFiles = async (taskId: number) => {
+    try {
+      await clearCombineUnusedFiles(taskId)
+      setSuccessMessage('无用文件已清理')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '清理无用文件失败'
+      setError(message)
+    }
+  }
+
   const handleView = async (taskId: number) => {
     setDetailOpen(true)
     setDetailLoading(true)
@@ -589,6 +601,7 @@ function App() {
                   onRetry={(taskId) => void handleRetry(taskId)}
                   onDelete={(taskId) => void handleDelete(taskId)}
                   onOpenVideo={handleOpenVideo}
+                  onClearCombineUnusedFiles={(taskId) => void handleClearCombineUnusedFiles(taskId)}
                 />
               }
             />
@@ -742,7 +755,7 @@ function buildCommandPreview(payload: TaskPayload) {
       if (payload.inputs.length > 0) {
         parts.push(`--inputs=${shellDoubleQuote(payload.inputs.join(','))}`)
       } else {
-        parts.push(`-r ${payload.reg_name}`)
+        parts.push(`-r "${payload.reg_name}"`)
         parts.push(`--reg-file-start=${payload.reg_name_start}`)
         parts.push(`--reg-file-end=${payload.reg_name_end}`)
       }

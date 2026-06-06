@@ -11,6 +11,7 @@ const detectTimeoutMs = Number.parseInt(process.env.MEDIA_TOOL_DETECT_TIMEOUT_MS
 const forceStrictPort = process.argv.includes('--strict-port')
 const backendBinaryName = process.platform === 'win32' ? 'media-tool-rs.exe' : 'media-tool-rs'
 const backendBinaryPath = resolve(repoRoot, 'target', 'debug', backendBinaryName)
+const usePrebuiltBackend = process.env.MEDIA_TOOL_USE_PREBUILT_BACKEND === 'true'
 
 let frontendStarted = false
 let shuttingDown = false
@@ -123,13 +124,17 @@ function startBackend() {
     env: getSpawnSafeEnv(process.env),
   }
 
-  if (existsSync(backendBinaryPath)) {
+  if (usePrebuiltBackend && existsSync(backendBinaryPath)) {
     console.log(`[dev] launching backend binary: ${backendBinaryPath}`)
     backendStartedWithCargo = false
     return spawn(backendBinaryPath, ['serve', '--port', '0'], spawnOptions)
   }
 
-  console.log('[dev] backend binary not found, falling back to cargo run')
+  if (usePrebuiltBackend && !existsSync(backendBinaryPath)) {
+    console.log('[dev] prebuilt backend requested but binary not found, falling back to cargo run')
+  } else {
+    console.log('[dev] launching backend with cargo run (fresh build)')
+  }
   backendStartedWithCargo = true
   return spawn('cargo', ['run', '--', 'serve', '--port', '0'], spawnOptions)
 }

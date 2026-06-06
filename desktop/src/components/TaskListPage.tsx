@@ -29,6 +29,7 @@ export type TaskListPageProps = {
   onOpenVideo?: (task: TaskRecord) => void
   onEditFailedTask?: (taskId: number) => void
   onClearTempFiles?: (taskId: number) => void
+  onClearCombineUnusedFiles?: (taskId: number) => void
 }
 
 function TaskListPage({
@@ -45,6 +46,7 @@ function TaskListPage({
   onOpenVideo,
   onEditFailedTask,
   onClearTempFiles,
+  onClearCombineUnusedFiles,
 }: TaskListPageProps) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -127,6 +129,11 @@ function TaskListPage({
                     {task.payload.kind === 'download' && onClearTempFiles ? (
                       <Button variant="outlined" size="small" onClick={() => onClearTempFiles(task.id)}>
                         清理临时文件
+                      </Button>
+                    ) : null}
+                    {task.payload.kind === 'combine' && task.status === 'success' && task.payload.target_file_name.trim() && onClearCombineUnusedFiles ? (
+                      <Button variant="outlined" size="small" onClick={() => onClearCombineUnusedFiles(task.id)}>
+                        清理无用文件
                       </Button>
                     ) : null}
                     <Button variant="outlined" size="small" onClick={() => onRetry(task.id)}>

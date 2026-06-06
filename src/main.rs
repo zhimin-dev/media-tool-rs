@@ -148,14 +148,18 @@ pub struct CombineArgs {
 
 impl CombineArgs {
     fn get_target_folder(&self) -> String {
-        let target;
         if self.target_file_name.is_empty() {
-            target = format!("./{}", get_reg_file_name(self.reg_name.to_owned()));
+            get_reg_file_name(self.reg_name.to_owned())
         } else {
-            target = format!("./{}", self.target_file_name);
+            self.target_file_name.clone()
         }
+    }
 
-        target
+    fn get_source_dir(&self) -> PathBuf {
+        Path::new(self.reg_name.as_str())
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
     }
     pub fn combine(&self) {
         let files = get_reg_files(
@@ -164,12 +168,14 @@ impl CombineArgs {
             self.reg_name_end,
         )
         .expect("解析失败");
-        let file_name = to_files().expect("生成文件失败");
+        let source_dir = self.get_source_dir();
+        let file_name = to_files(&source_dir).expect("生成文件失败");
         let target = self.get_target_folder();
         let res = combine_video(
             files,
             file_name.clone(),
             target,
+            source_dir,
             self.same_param_index,
             self.set_a_b,
             self.set_v_b,

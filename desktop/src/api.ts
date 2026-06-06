@@ -166,12 +166,20 @@ export async function createCutBatch(request: CreateCutBatchRequest): Promise<Ta
 
 type UploadVideoOptions = {
   subDir?: string
+  rootDir?: 'uploads' | 'cut'
+  preserveFileName?: boolean
 }
 
 export async function uploadVideo(file: File, options: UploadVideoOptions = {}): Promise<{ path: string }> {
   const params = new URLSearchParams({ file_name: file.name || 'uploaded.mp4' })
   if (options.subDir?.trim()) {
     params.set('sub_dir', options.subDir.trim())
+  }
+  if (options.rootDir) {
+    params.set('root_dir', options.rootDir)
+  }
+  if (options.preserveFileName) {
+    params.set('preserve_file_name', 'true')
   }
   const response = await apiFetch(`/upload-video?${params.toString()}`, {
     method: 'POST',
@@ -215,6 +223,13 @@ export async function updateTaskBaseInfo(id: number, payload: BaseInfo): Promise
 
 export async function clearTaskTempFiles(id: number): Promise<void> {
   const response = await apiFetch(`/tasks/${id}/clear-temp`, {
+    method: 'POST',
+  })
+  await parseResponse<{ message: string }>(response)
+}
+
+export async function clearCombineUnusedFiles(id: number): Promise<void> {
+  const response = await apiFetch(`/tasks/${id}/clear-combine-unused`, {
     method: 'POST',
   })
   await parseResponse<{ message: string }>(response)

@@ -7,7 +7,7 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -15,7 +15,8 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::fs::File;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{RwLock, Semaphore};
 use url::Url;
@@ -274,6 +275,10 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
                 "/api/tasks/{id}/clear-temp",
                 web::post().to(clear_task_temp_files),
             )
+            .route(
+                "/api/tasks/{id}/clear-combine-unused",
+                web::post().to(clear_combine_unused_files),
+            )
             .route("/api/upload-video", web::post().to(upload_video))
             .route("/api/serve-video", web::get().to(serve_video))
             .service(Files::new("/static", "./static").disable_content_disposition())
@@ -349,6 +354,10 @@ struct UploadVideoQuery {
     file_name: String,
     #[serde(default)]
     sub_dir: String,
+    #[serde(default)]
+    root_dir: String,
+    #[serde(default, deserialize_with = "deserialize_bool_like")]
+    preserve_file_name: bool,
 }
 
 #[derive(Serialize)]
@@ -371,28 +380,29 @@ async fn upload_video(
     };
 
     let upload_sub_dir = sanitize_upload_sub_dir(&query.sub_dir);
+    let upload_root_dir = resolve_upload_root_dir(&query.root_dir);
     let upload_dir = if upload_sub_dir.as_os_str().is_empty() {
-        current_dir.join("static").join("uploads")
+        current_dir.join("static").join(upload_root_dir)
     } else {
         current_dir
             .join("static")
-            .join("uploads")
+            .join(upload_root_dir)
             .join(upload_sub_dir)
     };
     if let Err(error) = ensure_directory_exists(upload_dir.clone()) {
         return HttpResponse::InternalServerError().body(error.to_string());
     }
 
-    let extension = Path::new(&sanitize_upload_file_name(&query.file_name))
+    let sanitized_file_name = sanitize_upload_file_name(&query.file_name);
+    let extension = Path::new(&sanitized_file_name)
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_lowercase())
         .filter(|ext| !ext.is_empty())
         .unwrap_or_else(|| "mp4".to_string());
 
-    let temp_path = upload_dir.join(format!("upload-{}.tmp", now()));
-    let mut temp_file = match File::create(&temp_path).await {
-        Ok(file) => file,
+    let (mut temp_file, temp_path) = match create_upload_temp_file(&upload_dir).await {
+        Ok(tuple) => tuple,
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     };
     let mut has_data = false;
@@ -425,20 +435,40 @@ async fn upload_video(
     }
     drop(temp_file);
 
-    let target_name = format!("{:x}.{}", digest.finalize(), extension);
+    let target_name = if query.preserve_file_name {
+        sanitized_file_name
+    } else {
+        format!("{:x}.{}", digest.finalize(), extension)
+    };
     let target_path = upload_dir.join(target_name);
-    if !target_path.exists() {
-        if let Err(error) = fs::rename(&temp_path, &target_path) {
+    if target_path.exists() {
+        if let Err(error) = fs::remove_file(&target_path) {
             let _ = tokio::fs::remove_file(&temp_path).await;
             return HttpResponse::InternalServerError().body(error.to_string());
         }
-    } else {
+    }
+    if let Err(error) = fs::rename(&temp_path, &target_path) {
         let _ = tokio::fs::remove_file(&temp_path).await;
+        return HttpResponse::InternalServerError().body(error.to_string());
     }
 
     HttpResponse::Ok().json(UploadVideoResponse {
         path: target_path.display().to_string(),
     })
+}
+
+fn deserialize_bool_like<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(DeError::custom(
+            "provided string was not a supported boolean value",
+        )),
+    }
 }
 
 async fn serve_video(query: web::Query<ServeVideoQuery>, req: HttpRequest) -> HttpResponse {
@@ -951,6 +981,103 @@ async fn clear_task_temp_files(path: web::Path<u64>, state: web::Data<AppState>)
     }
 }
 
+async fn clear_combine_unused_files(
+    path: web::Path<u64>,
+    state: web::Data<AppState>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let task = {
+        let tasks = state.tasks.read().await;
+        tasks.get(&id).cloned()
+    };
+
+    let Some(task) = task else {
+        return HttpResponse::NotFound().json(serde_json::json!({
+            "message": format!("task {} not found", id),
+        }));
+    };
+
+    if task.status != TaskStatus::Success {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "仅支持清理成功的合并任务",
+        }));
+    }
+
+    let TaskPayload::Combine {
+        target_file_name, ..
+    } = &task.payload
+    else {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "仅合并任务支持清理无用文件",
+        }));
+    };
+
+    let target_file_name = target_file_name.clone();
+    if target_file_name.trim().is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "未填写输出文件名，跳过清理",
+        }));
+    }
+
+    let Some(result_path) = task.result_path else {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "任务结果路径不存在",
+        }));
+    };
+
+    let output_dir = Path::new(&result_path)
+        .parent()
+        .map(|path| path.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    if !output_dir.is_dir() {
+        return HttpResponse::Ok().json(serde_json::json!({ "message": "目录不存在，无需清理" }));
+    }
+
+    let keep_file_name = Path::new(&get_file_name(target_file_name))
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_string();
+    if keep_file_name.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "输出文件名无效，跳过清理",
+        }));
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        let entries = fs::read_dir(&output_dir).map_err(|error| error.to_string())?;
+        let mut removed = 0usize;
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let entry_path = entry.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+            let file_name = entry_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if file_name != keep_file_name {
+                if fs::remove_file(&entry_path).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        Ok::<usize, String>(removed)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(removed)) => HttpResponse::Ok().json(serde_json::json!({
+            "message": format!("已清理 {} 个无用文件", removed),
+        })),
+        Ok(Err(message)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": message }))
+        }
+        Err(error) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "message": error.to_string() })),
+    }
+}
+
 async fn list_header_presets(state: web::Data<AppState>) -> impl Responder {
     let presets = state.header_presets.read().await.clone();
     HttpResponse::Ok().json(presets)
@@ -1258,24 +1385,41 @@ async fn run_combine_task(
     set_width: i32,
 ) -> Result<TaskOutcome, String> {
     tokio::task::spawn_blocking(move || {
+        let current_dir = env::current_dir().map_err(|error| error.to_string())?;
+        let normalized_reg_name = resolve_to_absolute_pattern_path(&current_dir, &reg_name);
+        let normalized_inputs = inputs
+            .into_iter()
+            .map(|value| {
+                resolve_to_absolute_path(&current_dir, value.trim())
+                    .display()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
         let output_name = get_file_name(target_file_name);
-        let files = if inputs.is_empty() {
-            get_reg_files(reg_name.clone(), reg_name_start, reg_name_end)
+        let files = if normalized_inputs.is_empty() {
+            get_reg_files(normalized_reg_name.clone(), reg_name_start, reg_name_end)
                 .map_err(|_| "解析文件失败".to_string())?
         } else {
-            inputs
+            normalized_inputs
         };
-        let file_name = to_files().map_err(|_| "生成临时文件失败".to_string())?;
+        let source_dir = files
+            .first()
+            .and_then(|first| Path::new(first).parent())
+            .or_else(|| Path::new(&normalized_reg_name).parent())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let file_name = to_files(&source_dir).map_err(|_| "生成临时文件失败".to_string())?;
         let target = if output_name.trim().is_empty() {
-            format!("./{}.mp4", now())
+            source_dir.join(format!("{}.mp4", now())).display().to_string()
         } else {
-            format!("./{}", output_name)
+            source_dir.join(&output_name).display().to_string()
         };
 
         let success = combine_video(
             files,
             file_name,
             target.clone(),
+            source_dir,
             same_param_index,
             set_a_b,
             set_v_b,
@@ -1289,8 +1433,7 @@ async fn run_combine_task(
             return Err("合并文件失败".to_string());
         }
 
-        let current_dir = env::current_dir().map_err(|error| error.to_string())?;
-        let result_path = current_dir.join(target.trim_start_matches("./"));
+        let result_path = PathBuf::from(target);
 
         Ok(TaskOutcome {
             message: "合并完成".to_string(),
@@ -1299,6 +1442,21 @@ async fn run_combine_task(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+fn resolve_to_absolute_pattern_path(current_dir: &Path, raw: &str) -> String {
+    resolve_to_absolute_path(current_dir, raw)
+        .display()
+        .to_string()
+}
+
+fn resolve_to_absolute_path(current_dir: &Path, raw: &str) -> PathBuf {
+    let candidate = Path::new(raw);
+    if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        current_dir.join(candidate)
+    }
 }
 
 async fn run_cut_task(
@@ -1475,6 +1633,45 @@ fn sanitize_upload_sub_dir(sub_dir: &str) -> PathBuf {
         path.push(clean);
     }
     path
+}
+
+fn resolve_upload_root_dir(root_dir: &str) -> &'static str {
+    if root_dir.eq_ignore_ascii_case("cut") {
+        "cut"
+    } else {
+        "uploads"
+    }
+}
+
+fn unique_upload_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    static UPLOAD_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = UPLOAD_TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{}-{}", now(), nanos, seq)
+}
+
+async fn create_upload_temp_file(upload_dir: &Path) -> std::io::Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let temp_path = upload_dir.join(format!("upload-{}.tmp", unique_upload_suffix()));
+        match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .await
+        {
+            Ok(file) => return Ok((file, temp_path)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "failed to allocate unique upload temp file",
+    ))
 }
 
 fn write_base_info(folder_path: &PathBuf, base_info: &BaseInfo) -> std::io::Result<()> {
