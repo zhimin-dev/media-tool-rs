@@ -1,7 +1,8 @@
-import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from '@mui/material'
 import { useMemo } from 'react'
 import type { ApiConnectionStatus } from '../api'
 import HeaderRowFields from '../components/HeaderRowFields'
+import { RESOLUTION_OPTIONS, VIDEO_CODEC_OPTIONS } from '../constants/transcodeOptions'
 import type { HeaderPreset, HeaderRow, TranscodePreset } from '../types'
 
 type HeaderPresetsPageProps = {
@@ -223,21 +224,36 @@ function HeaderPresetsPage({
               value={transcodePresetForm.title}
               onChange={(event) => onTranscodePresetFormChange('title', event.target.value)}
             />
-            <TextField
-              fullWidth
-              label="视频编码"
-              value={transcodePresetForm.video_codec}
-              onChange={(event) => onTranscodePresetFormChange('video_codec', event.target.value)}
-              helperText="留空表示跟随原视频；也可填写 h264 / h265 / copy"
-            />
-            <TextField
-              fullWidth
-              label="分辨率"
-              value={transcodePresetForm.resolution}
-              placeholder="例如 1080p、720p、1920x1080"
-              onChange={(event) => onTranscodePresetFormChange('resolution', event.target.value)}
-              helperText="留空表示跟随原视频；1080p/720p 会自动按源视频横竖方向缩放"
-            />
+            <FormControl fullWidth>
+              <InputLabel id="transcode-preset-video-codec-label">视频编码</InputLabel>
+              <Select
+                labelId="transcode-preset-video-codec-label"
+                label="视频编码"
+                value={transcodePresetForm.video_codec}
+                onChange={(event) => onTranscodePresetFormChange('video_codec', event.target.value)}
+              >
+                {VIDEO_CODEC_OPTIONS.map((option) => (
+                  <MenuItem key={`video-codec-${option.value || 'follow-source'}`} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel id="transcode-preset-resolution-label">分辨率</InputLabel>
+              <Select
+                labelId="transcode-preset-resolution-label"
+                label="分辨率"
+                value={transcodePresetForm.resolution}
+                onChange={(event) => onTranscodePresetFormChange('resolution', event.target.value)}
+              >
+                {RESOLUTION_OPTIONS.map((option) => (
+                  <MenuItem key={`resolution-${option.value || 'follow-source'}`} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <TextField
               fullWidth
               label="视频码率 (kbps)"

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, FormControlLabel, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, Switch, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
 import { probeVideo, uploadVideo } from '../api'
+import { RESOLUTION_OPTIONS, VIDEO_CODEC_OPTIONS } from '../constants/transcodeOptions'
 import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset, TranscodePayload, TranscodePreset, VideoProbeInfo } from '../types'
 
 type CreateTaskDialogProps = {
@@ -482,10 +483,11 @@ function CreateTaskDialog({
                 value={transcodeForm.video_codec}
                 onChange={(event) => onTranscodeFormChange((current) => ({ ...current, video_codec: event.target.value }))}
               >
-                <MenuItem value="">跟随原视频</MenuItem>
-                <MenuItem value="h264">H.264 (libx264)</MenuItem>
-                <MenuItem value="h265">H.265 (libx265)</MenuItem>
-                <MenuItem value="copy">拷贝不转码</MenuItem>
+                {VIDEO_CODEC_OPTIONS.map((option) => (
+                  <MenuItem key={`video-codec-${option.value || 'follow-source'}`} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
             <FormControl fullWidth>
@@ -496,12 +498,11 @@ function CreateTaskDialog({
                 value={transcodeForm.resolution}
                 onChange={(event) => onTranscodeFormChange((current) => ({ ...current, resolution: event.target.value }))}
               >
-                <MenuItem value="">跟随原视频</MenuItem>
-                <MenuItem value="1080p">1080p</MenuItem>
-                <MenuItem value="720p">720p</MenuItem>
-                <MenuItem value="480p">480p</MenuItem>
-                <MenuItem value="360p">360p</MenuItem>
-                <MenuItem value="1920x1080">1920x1080</MenuItem>
+                {RESOLUTION_OPTIONS.map((option) => (
+                  <MenuItem key={`resolution-${option.value || 'follow-source'}`} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
             <TextField

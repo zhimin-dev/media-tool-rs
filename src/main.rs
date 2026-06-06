@@ -38,6 +38,78 @@ enum Commands {
     Cut(CutArgs),
     /// 启动可视化任务接口
     Serve(ServeArgs),
+    /// 转码视频
+    Transcode(TranscodeArgs),
+}
+
+#[derive(clapArgs)]
+pub struct TranscodeArgs {
+    /// 输入视频文件路径
+    #[arg(short = 'i', long = "input")]
+    input: String,
+
+    /// 输出文件名（可选，不填自动生成）
+    #[arg(long = "target_file_name", default_value_t = String::from(""))]
+    target_file_name: String,
+
+    /// 视频编码：h264/h265/copy，留空跟随原视频
+    #[arg(long = "video_codec", default_value_t = String::from(""))]
+    video_codec: String,
+
+    /// 分辨率：如 1080p、720p、1920x1080，留空跟随原视频
+    #[arg(long = "resolution", default_value_t = String::from(""))]
+    resolution: String,
+
+    /// 视频码率（kbps）
+    #[arg(long = "video_bitrate_kbps", default_value_t = 0)]
+    video_bitrate_kbps: i32,
+
+    /// 帧率
+    #[arg(long = "fps", default_value_t = 0)]
+    fps: i32,
+
+    /// 音频编码：aac/mp3/opus/copy，留空跟随原视频
+    #[arg(long = "audio_codec", default_value_t = String::from(""))]
+    audio_codec: String,
+
+    /// 音频码率（kbps）
+    #[arg(long = "audio_bitrate_kbps", default_value_t = 0)]
+    audio_bitrate_kbps: i32,
+
+    /// 音频声道
+    #[arg(long = "audio_channels", default_value_t = 0)]
+    audio_channels: i32,
+
+    /// 音频采样率（Hz）
+    #[arg(long = "audio_sample_rate", default_value_t = 0)]
+    audio_sample_rate: i32,
+}
+
+impl TranscodeArgs {
+    pub async fn transcode(self) {
+        let result = api::run_transcode_once(
+            self.input,
+            self.target_file_name,
+            self.video_codec,
+            self.resolution,
+            self.video_bitrate_kbps,
+            self.fps,
+            self.audio_codec,
+            self.audio_bitrate_kbps,
+            self.audio_channels,
+            self.audio_sample_rate,
+        )
+        .await;
+
+        match result {
+            Ok(output_path) => {
+                println!("转码成功: {}", output_path);
+            }
+            Err(error) => {
+                println!("转码失败: {}", error);
+            }
+        }
+    }
 }
 
 #[derive(clapArgs)]
@@ -360,7 +432,7 @@ pub async fn main() {
     let current_dir = env::current_dir().unwrap();
     let args = Args::parse();
     match args.command {
-        Commands::Combine(mut args) => args.combine(),
+        Commands::Combine(args) => args.combine(),
         Commands::Cut(mut args) => {
             args.cut();
         }
@@ -369,6 +441,9 @@ pub async fn main() {
         }
         Commands::Serve(args) => {
             api::run_server(args.port).await.expect("启动服务失败");
+        }
+        Commands::Transcode(args) => {
+            args.transcode().await;
         }
     }
 }

@@ -1909,6 +1909,37 @@ async fn run_transcode_task(
     .map_err(|error| error.to_string())?
 }
 
+pub async fn run_transcode_once(
+    input: String,
+    target_file_name: String,
+    video_codec: String,
+    resolution: String,
+    video_bitrate_kbps: i32,
+    fps: i32,
+    audio_codec: String,
+    audio_bitrate_kbps: i32,
+    audio_channels: i32,
+    audio_sample_rate: i32,
+) -> Result<String, String> {
+    let outcome = run_transcode_task(
+        input,
+        target_file_name,
+        video_codec,
+        resolution,
+        video_bitrate_kbps,
+        fps,
+        audio_codec,
+        audio_bitrate_kbps,
+        audio_channels,
+        audio_sample_rate,
+    )
+    .await?;
+
+    outcome
+        .result_path
+        .ok_or_else(|| "转码完成，但未返回输出路径".to_string())
+}
+
 fn resolve_transcode_output_path(input_path: &Path, target_file_name: &str) -> PathBuf {
     let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
     if !target_file_name.trim().is_empty() {
