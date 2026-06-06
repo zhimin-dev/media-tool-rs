@@ -337,9 +337,10 @@ pub mod download {
                         let output_duration = get_video_duration_secs(&file_name);
                         match output_duration {
                             Some(actual) => {
-                                let diff = (actual - m3u8_total_duration).abs();
-                                // 允许 10 秒误差
-                                if diff <= 10.0 {
+                                // 实际时长大于 m3u8 时长时也视为成功；否则允许 10 秒误差
+                                if actual > m3u8_total_duration
+                                    || (actual - m3u8_total_duration).abs() <= 10.0
+                                {
                                     println!(
                                         "合并完成，时长校验通过：实际 {:.1}s，预期 {:.1}s",
                                         actual, m3u8_total_duration
