@@ -76,6 +76,12 @@ npm run dev
 
 默认开发地址是 `http://127.0.0.1:5173`，Vite 已代理 `/api` 到 `http://127.0.0.1:8080`。
 
+如果使用 `npm run tauri dev`：
+
+- 请确保在 `desktop` 目录执行命令；
+- 首次运行会编译 `desktop/src-tauri`（已初始化）；
+- Linux 需要先安装 GTK/WebKit 相关系统依赖（例如 `glib-2.0`、`webkit2gtk`、`libsoup3` 等），否则会出现 `glib-2.0.pc not found` 之类报错。
+
 ### 3. 前端能力
 
 - 可视化创建 `download` / `combine` / `cut` 任务
