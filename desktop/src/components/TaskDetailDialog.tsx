@@ -39,6 +39,13 @@ function TaskDetailDialog({ open, loading, detail, onClose, onOpenVideo }: TaskD
                 </Button>
               </Box>
             ) : null}
+            {detail.task.payload.kind === 'transcode' && detail.task.status === 'success' && detail.task.result_path ? (
+              <Box>
+                <Button size="small" variant="outlined" onClick={() => onOpenVideo(detail.task)}>
+                  打开播放
+                </Button>
+              </Box>
+            ) : null}
             {detail.child_tasks.length > 0 ? (
               <Stack spacing={0.5}>
                 <Typography variant="subtitle2">子任务：</Typography>

@@ -13,6 +13,7 @@ use std::env;
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,6 +37,7 @@ enum TaskKind {
     Download,
     Combine,
     Cut,
+    Transcode,
 }
 
 impl TaskKind {
@@ -44,6 +46,7 @@ impl TaskKind {
             TaskKind::Download => "download_tasks.json",
             TaskKind::Combine => "combine_tasks.json",
             TaskKind::Cut => "cut_tasks.json",
+            TaskKind::Transcode => "transcode_tasks.json",
         }
     }
 
@@ -54,6 +57,7 @@ impl TaskKind {
                 | (TaskKind::Combine, TaskPayload::Combine { .. })
                 | (TaskKind::Cut, TaskPayload::Cut { .. })
                 | (TaskKind::Cut, TaskPayload::CutBatch { .. })
+                | (TaskKind::Transcode, TaskPayload::Transcode { .. })
         )
     }
 }
@@ -103,6 +107,35 @@ pub enum TaskPayload {
         delete_input_file: bool,
         segments: Vec<CutSegment>,
     },
+    Transcode {
+        input: String,
+        #[serde(default)]
+        target_file_name: String,
+        #[serde(default = "default_video_codec")]
+        video_codec: String,
+        #[serde(default)]
+        resolution: String,
+        #[serde(default)]
+        video_bitrate_kbps: i32,
+        #[serde(default)]
+        fps: i32,
+        #[serde(default = "default_audio_codec")]
+        audio_codec: String,
+        #[serde(default)]
+        audio_bitrate_kbps: i32,
+        #[serde(default)]
+        audio_channels: i32,
+        #[serde(default)]
+        audio_sample_rate: i32,
+    },
+}
+
+fn default_video_codec() -> String {
+    "h264".to_string()
+}
+
+fn default_audio_codec() -> String {
+    "aac".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +223,49 @@ pub struct HeaderPreset {
     pub headers: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscodePreset {
+    pub title: String,
+    #[serde(default = "default_video_codec")]
+    pub video_codec: String,
+    #[serde(default)]
+    pub resolution: String,
+    #[serde(default)]
+    pub video_bitrate_kbps: i32,
+    #[serde(default)]
+    pub fps: i32,
+    #[serde(default = "default_audio_codec")]
+    pub audio_codec: String,
+    #[serde(default)]
+    pub audio_bitrate_kbps: i32,
+    #[serde(default)]
+    pub audio_channels: i32,
+    #[serde(default)]
+    pub audio_sample_rate: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VideoProbeRequest {
+    pub input: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VideoProbeResponse {
+    pub format_name: String,
+    pub duration_seconds: Option<f64>,
+    pub size_bytes: Option<u64>,
+    pub overall_bitrate: Option<u64>,
+    pub video_codec: Option<String>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub fps: Option<f64>,
+    pub video_bitrate: Option<u64>,
+    pub audio_codec: Option<String>,
+    pub audio_channels: Option<i32>,
+    pub audio_sample_rate: Option<i32>,
+    pub audio_bitrate: Option<u64>,
+}
+
 #[derive(Clone)]
 struct AppState {
     tasks: Arc<RwLock<HashMap<u64, TaskRecord>>>,
@@ -197,6 +273,8 @@ struct AppState {
     executor: Arc<Semaphore>,
     header_presets: Arc<RwLock<Vec<HeaderPreset>>>,
     header_presets_path: Arc<PathBuf>,
+    transcode_presets: Arc<RwLock<Vec<TranscodePreset>>>,
+    transcode_presets_path: Arc<PathBuf>,
     tasks_config_dir: Arc<PathBuf>,
 }
 
@@ -217,12 +295,21 @@ impl AppState {
         if let Err(error) = ensure_header_presets_file(&header_presets_path) {
             println!("failed to initialize config/header_presets.json: {}", error);
         }
+        let transcode_presets_path = current_dir.join("config").join("transcode_presets.json");
+        if let Err(error) = ensure_transcode_presets_file(&transcode_presets_path) {
+            println!(
+                "failed to initialize config/transcode_presets.json: {}",
+                error
+            );
+        }
         Self {
             tasks: Arc::new(RwLock::new(tasks)),
             next_id: Arc::new(AtomicU64::new(next_id)),
             executor: Arc::new(Semaphore::new(1)),
             header_presets: Arc::new(RwLock::new(load_header_presets(&header_presets_path))),
             header_presets_path: Arc::new(header_presets_path),
+            transcode_presets: Arc::new(RwLock::new(load_transcode_presets(&transcode_presets_path))),
+            transcode_presets_path: Arc::new(transcode_presets_path),
             tasks_config_dir: Arc::new(tasks_config_dir),
         }
     }
@@ -280,7 +367,14 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
                 web::post().to(clear_combine_unused_files),
             )
             .route("/api/upload-video", web::post().to(upload_video))
+            .route("/api/video-probe", web::post().to(probe_video))
             .route("/api/serve-video", web::get().to(serve_video))
+            .route("/api/transcode-presets", web::get().to(list_transcode_presets))
+            .route("/api/transcode-presets", web::post().to(save_transcode_preset))
+            .route(
+                "/api/transcode-presets/{title}",
+                web::delete().to(delete_transcode_preset),
+            )
             .service(Files::new("/static", "./static").disable_content_disposition())
     })
     .listen(listener)?
@@ -455,6 +549,25 @@ async fn upload_video(
     HttpResponse::Ok().json(UploadVideoResponse {
         path: target_path.display().to_string(),
     })
+}
+
+async fn probe_video(request: web::Json<VideoProbeRequest>) -> impl Responder {
+    let input = request.input.trim().to_string();
+    if input.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "输入文件不能为空",
+        }));
+    }
+
+    let result = tokio::task::spawn_blocking(move || probe_video_with_ffprobe(&input)).await;
+    match result {
+        Ok(Ok(response)) => HttpResponse::Ok().json(response),
+        Ok(Err(message)) => {
+            HttpResponse::BadRequest().json(serde_json::json!({ "message": message }))
+        }
+        Err(error) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "message": error.to_string() })),
+    }
 }
 
 fn deserialize_bool_like<'de, D>(deserializer: D) -> Result<bool, D::Error>
@@ -1155,6 +1268,86 @@ async fn delete_header_preset(
     HttpResponse::NoContent().finish()
 }
 
+async fn list_transcode_presets(state: web::Data<AppState>) -> impl Responder {
+    let presets = state.transcode_presets.read().await.clone();
+    HttpResponse::Ok().json(presets)
+}
+
+async fn save_transcode_preset(
+    state: web::Data<AppState>,
+    request: web::Json<TranscodePreset>,
+) -> impl Responder {
+    let title = request.title.trim().to_string();
+    if title.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "预设标题不能为空",
+        }));
+    }
+
+    let preset = TranscodePreset {
+        title,
+        video_codec: request.video_codec.trim().to_string(),
+        resolution: request.resolution.trim().to_string(),
+        video_bitrate_kbps: request.video_bitrate_kbps.max(0),
+        fps: request.fps.max(0),
+        audio_codec: request.audio_codec.trim().to_string(),
+        audio_bitrate_kbps: request.audio_bitrate_kbps.max(0),
+        audio_channels: request.audio_channels.max(0),
+        audio_sample_rate: request.audio_sample_rate.max(0),
+    };
+
+    let persisted = {
+        let mut presets = state.transcode_presets.write().await;
+        if let Some(current) = presets.iter_mut().find(|item| item.title == preset.title) {
+            *current = preset.clone();
+        } else {
+            presets.push(preset.clone());
+        }
+        presets.sort_by(|left, right| left.title.cmp(&right.title));
+        presets.clone()
+    };
+
+    if let Err(error) = write_transcode_presets(&state.transcode_presets_path, &persisted) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("保存转码预设失败: {}", error),
+        }));
+    }
+
+    HttpResponse::Ok().json(preset)
+}
+
+async fn delete_transcode_preset(
+    state: web::Data<AppState>,
+    title: web::Path<String>,
+) -> impl Responder {
+    let normalized_title = title.trim().to_string();
+    if normalized_title.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "预设标题不能为空",
+        }));
+    }
+
+    let persisted = {
+        let mut presets = state.transcode_presets.write().await;
+        let previous_len = presets.len();
+        presets.retain(|item| item.title != normalized_title);
+        if presets.len() == previous_len {
+            return HttpResponse::NotFound().json(serde_json::json!({
+                "message": "转码预设不存在",
+            }));
+        }
+        presets.clone()
+    };
+
+    if let Err(error) = write_transcode_presets(&state.transcode_presets_path, &persisted) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("删除转码预设失败: {}", error),
+        }));
+    }
+
+    HttpResponse::NoContent().finish()
+}
+
 async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
     let Ok(_permit) = state.executor.clone().acquire_owned().await else {
         return;
@@ -1235,6 +1428,32 @@ async fn execute_task(state: AppState, id: u64, payload: TaskPayload) {
             delete_input_file,
             segments,
         } => run_cut_batch_task(&state, id, input, delete_input_file, segments).await,
+        TaskPayload::Transcode {
+            input,
+            target_file_name,
+            video_codec,
+            resolution,
+            video_bitrate_kbps,
+            fps,
+            audio_codec,
+            audio_bitrate_kbps,
+            audio_channels,
+            audio_sample_rate,
+        } => {
+            run_transcode_task(
+                input,
+                target_file_name,
+                video_codec,
+                resolution,
+                video_bitrate_kbps,
+                fps,
+                audio_codec,
+                audio_bitrate_kbps,
+                audio_channels,
+                audio_sample_rate,
+            )
+            .await
+        }
     };
 
     if let Err(error) = update_task(&state, id, |task| {
@@ -1587,6 +1806,258 @@ async fn run_cut_batch_task(
     })
 }
 
+async fn run_transcode_task(
+    input: String,
+    target_file_name: String,
+    video_codec: String,
+    resolution: String,
+    video_bitrate_kbps: i32,
+    fps: i32,
+    audio_codec: String,
+    audio_bitrate_kbps: i32,
+    audio_channels: i32,
+    audio_sample_rate: i32,
+) -> Result<TaskOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let input_path = PathBuf::from(input.trim());
+        if input_path.as_os_str().is_empty() {
+            return Err("请输入需要转码的视频文件".to_string());
+        }
+        if !input_path.exists() {
+            return Err("输入视频文件不存在".to_string());
+        }
+
+        let probe = probe_video_with_ffprobe(input_path.to_string_lossy().as_ref())?;
+
+        let output_path = resolve_transcode_output_path(&input_path, &target_file_name);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        let mut command = Command::new("ffmpeg");
+        command.arg("-y").arg("-i").arg(&input_path);
+
+        let scale_filter = build_transcode_scale_filter(&resolution, probe.width, probe.height)?;
+        let video_codec_mode = resolve_video_codec_mode(
+            &video_codec,
+            scale_filter.is_some(),
+            video_bitrate_kbps > 0,
+            fps > 0,
+            probe.video_codec.as_deref(),
+        );
+        match video_codec_mode {
+            VideoCodecMode::Copy => {
+                command.arg("-c:v").arg("copy");
+            }
+            VideoCodecMode::Encode(encoder) => {
+                command.arg("-c:v").arg(encoder);
+            }
+        }
+
+        if let Some(scale_filter) = scale_filter {
+            command.arg("-vf").arg(scale_filter);
+        }
+        if video_bitrate_kbps > 0 {
+            command
+                .arg("-b:v")
+                .arg(format!("{}k", video_bitrate_kbps.max(1)));
+        }
+        if fps > 0 {
+            command.arg("-r").arg(fps.to_string());
+        }
+
+        let audio_codec_mode = resolve_audio_codec_mode(
+            &audio_codec,
+            audio_bitrate_kbps > 0,
+            audio_channels > 0,
+            audio_sample_rate > 0,
+            probe.audio_codec.as_deref(),
+        );
+        match audio_codec_mode {
+            AudioCodecMode::Copy => {
+                command.arg("-c:a").arg("copy");
+            }
+            AudioCodecMode::Encode(encoder) => {
+                command.arg("-c:a").arg(encoder);
+                if audio_bitrate_kbps > 0 {
+                    command
+                        .arg("-b:a")
+                        .arg(format!("{}k", audio_bitrate_kbps.max(1)));
+                }
+                if audio_channels > 0 {
+                    command.arg("-ac").arg(audio_channels.to_string());
+                }
+                if audio_sample_rate > 0 {
+                    command.arg("-ar").arg(audio_sample_rate.to_string());
+                }
+            }
+        }
+
+        command.arg(&output_path);
+        let output = command.output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(format!("转码失败: {}", stderr));
+        }
+
+        Ok(TaskOutcome {
+            message: "转码完成".to_string(),
+            result_path: Some(output_path.display().to_string()),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn resolve_transcode_output_path(input_path: &Path, target_file_name: &str) -> PathBuf {
+    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+    if !target_file_name.trim().is_empty() {
+        return parent.join(ensure_video_extension(target_file_name));
+    }
+
+    let stem = input_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("video");
+    parent.join(format!("{}_transcoded_{}.mp4", stem, now()))
+}
+
+fn ensure_video_extension(file_name: &str) -> String {
+    if Path::new(file_name).extension().is_none() {
+        format!("{}.mp4", file_name)
+    } else {
+        file_name.to_string()
+    }
+}
+
+fn build_transcode_scale_filter(
+    resolution: &str,
+    source_width: Option<i32>,
+    source_height: Option<i32>,
+) -> Result<Option<String>, String> {
+    let normalized = resolution.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+
+    let Some(source_width) = source_width else {
+        return Err("无法读取视频分辨率，无法应用缩放".to_string());
+    };
+    let Some(source_height) = source_height else {
+        return Err("无法读取视频分辨率，无法应用缩放".to_string());
+    };
+
+    if let Some(target_short_edge) = normalized.strip_suffix('p') {
+        let short_edge = target_short_edge
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "分辨率格式不正确，示例：1080p 或 1920x1080".to_string())?;
+        if short_edge <= 0 {
+            return Err("分辨率必须大于 0".to_string());
+        }
+        if source_width >= source_height {
+            return Ok(Some(format!("scale=-2:{}", short_edge)));
+        }
+        return Ok(Some(format!("scale={}:-2", short_edge)));
+    }
+
+    let normalized = normalized.replace('*', "x");
+    let mut parts = normalized.split('x');
+    let width = parts
+        .next()
+        .ok_or_else(|| "分辨率格式不正确，示例：1080p 或 1920x1080".to_string())?
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| "分辨率格式不正确，示例：1080p 或 1920x1080".to_string())?;
+    let height = parts
+        .next()
+        .ok_or_else(|| "分辨率格式不正确，示例：1080p 或 1920x1080".to_string())?
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| "分辨率格式不正确，示例：1080p 或 1920x1080".to_string())?;
+    if parts.next().is_some() || width <= 0 || height <= 0 {
+        return Err("分辨率格式不正确，示例：1080p 或 1920x1080".to_string());
+    }
+
+    if source_width >= source_height {
+        Ok(Some(format!("scale={}:{}", width, height)))
+    } else {
+        Ok(Some(format!("scale={}:{}", height, width)))
+    }
+}
+
+enum VideoCodecMode {
+    Copy,
+    Encode(String),
+}
+
+fn resolve_video_codec_mode(
+    requested_codec: &str,
+    scale_filter_enabled: bool,
+    video_bitrate_enabled: bool,
+    fps_enabled: bool,
+    source_codec: Option<&str>,
+) -> VideoCodecMode {
+    let normalized = requested_codec.trim().to_ascii_lowercase();
+    let should_encode = scale_filter_enabled || video_bitrate_enabled || fps_enabled;
+    if normalized == "copy" && !should_encode {
+        return VideoCodecMode::Copy;
+    }
+    if normalized == "h265" || normalized == "hevc" || normalized == "libx265" {
+        return VideoCodecMode::Encode("libx265".to_string());
+    }
+    if normalized == "h264" || normalized == "avc" || normalized == "libx264" {
+        return VideoCodecMode::Encode("libx264".to_string());
+    }
+
+    match source_codec.map(|value| value.to_ascii_lowercase()) {
+        Some(codec) if codec.contains("265") || codec.contains("hevc") => {
+            VideoCodecMode::Encode("libx265".to_string())
+        }
+        Some(codec) if codec.contains("264") || codec.contains("avc") => {
+            VideoCodecMode::Encode("libx264".to_string())
+        }
+        _ if should_encode => VideoCodecMode::Encode("libx264".to_string()),
+        _ => VideoCodecMode::Copy,
+    }
+}
+
+enum AudioCodecMode {
+    Copy,
+    Encode(String),
+}
+
+fn resolve_audio_codec_mode(
+    requested_codec: &str,
+    audio_bitrate_enabled: bool,
+    audio_channels_enabled: bool,
+    audio_sample_rate_enabled: bool,
+    source_codec: Option<&str>,
+) -> AudioCodecMode {
+    let normalized = requested_codec.trim().to_ascii_lowercase();
+    let should_encode = audio_bitrate_enabled || audio_channels_enabled || audio_sample_rate_enabled;
+    if normalized == "copy" && !should_encode {
+        return AudioCodecMode::Copy;
+    }
+    if normalized == "mp3" || normalized == "libmp3lame" {
+        return AudioCodecMode::Encode("libmp3lame".to_string());
+    }
+    if normalized == "opus" || normalized == "libopus" {
+        return AudioCodecMode::Encode("libopus".to_string());
+    }
+    if normalized == "aac" {
+        return AudioCodecMode::Encode("aac".to_string());
+    }
+
+    match source_codec.map(|value| value.to_ascii_lowercase()) {
+        Some(codec) if codec.contains("aac") => AudioCodecMode::Encode("aac".to_string()),
+        Some(codec) if codec.contains("mp3") => AudioCodecMode::Encode("libmp3lame".to_string()),
+        Some(codec) if codec.contains("opus") => AudioCodecMode::Encode("libopus".to_string()),
+        _ if should_encode => AudioCodecMode::Encode("aac".to_string()),
+        _ => AudioCodecMode::Copy,
+    }
+}
+
 fn ensure_directory_exists(path: PathBuf) -> std::io::Result<()> {
     if !path.exists() {
         std::fs::create_dir_all(path)?;
@@ -1696,6 +2167,7 @@ fn default_title(payload: &TaskPayload) -> String {
         TaskPayload::Download { .. } => "下载任务".to_string(),
         TaskPayload::Combine { .. } => "合并任务".to_string(),
         TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => "截取任务".to_string(),
+        TaskPayload::Transcode { .. } => "转码任务".to_string(),
     }
 }
 
@@ -1837,6 +2309,54 @@ fn build_command_preview(payload: &TaskPayload) -> String {
             }
             parts.join(" ")
         }
+        TaskPayload::Transcode {
+            input,
+            target_file_name,
+            video_codec,
+            resolution,
+            video_bitrate_kbps,
+            fps,
+            audio_codec,
+            audio_bitrate_kbps,
+            audio_channels,
+            audio_sample_rate,
+        } => {
+            let mut parts = vec![
+                "media-tool-rs transcode".to_string(),
+                format!("-i={}", shell_double_quote(input)),
+            ];
+            if !target_file_name.trim().is_empty() {
+                parts.push(format!(
+                    "--target_file_name={}",
+                    shell_double_quote(target_file_name)
+                ));
+            }
+            if !video_codec.trim().is_empty() {
+                parts.push(format!("--video_codec={}", video_codec));
+            }
+            if !resolution.trim().is_empty() {
+                parts.push(format!("--resolution={}", resolution));
+            }
+            if *video_bitrate_kbps > 0 {
+                parts.push(format!("--video_bitrate_kbps={}", video_bitrate_kbps));
+            }
+            if *fps > 0 {
+                parts.push(format!("--fps={}", fps));
+            }
+            if !audio_codec.trim().is_empty() {
+                parts.push(format!("--audio_codec={}", audio_codec));
+            }
+            if *audio_bitrate_kbps > 0 {
+                parts.push(format!("--audio_bitrate_kbps={}", audio_bitrate_kbps));
+            }
+            if *audio_channels > 0 {
+                parts.push(format!("--audio_channels={}", audio_channels));
+            }
+            if *audio_sample_rate > 0 {
+                parts.push(format!("--audio_sample_rate={}", audio_sample_rate));
+            }
+            parts.join(" ")
+        }
     }
 }
 
@@ -1860,6 +2380,11 @@ fn resolve_task_output_detail(task: &TaskRecord) -> (Option<String>, Vec<String>
         TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => {
             current_dir.map(|base| base.join("static").join("cut"))
         }
+        TaskPayload::Transcode { .. } => task
+            .result_path
+            .as_ref()
+            .and_then(|value| Path::new(value).parent().map(|parent| parent.to_path_buf()))
+            .or(current_dir.clone()),
     };
 
     let files = output_dir
@@ -2053,12 +2578,18 @@ fn task_kind_from_payload(payload: &TaskPayload) -> TaskKind {
         TaskPayload::Download { .. } => TaskKind::Download,
         TaskPayload::Combine { .. } => TaskKind::Combine,
         TaskPayload::Cut { .. } | TaskPayload::CutBatch { .. } => TaskKind::Cut,
+        TaskPayload::Transcode { .. } => TaskKind::Transcode,
     }
 }
 
 fn ensure_task_files(task_config_dir: &PathBuf) -> std::io::Result<()> {
     fs::create_dir_all(task_config_dir)?;
-    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+    for kind in [
+        TaskKind::Download,
+        TaskKind::Combine,
+        TaskKind::Cut,
+        TaskKind::Transcode,
+    ] {
         let file_path = task_config_dir.join(kind.file_name());
         if !file_path.exists() {
             fs::write(file_path, "[]")?;
@@ -2069,7 +2600,12 @@ fn ensure_task_files(task_config_dir: &PathBuf) -> std::io::Result<()> {
 
 fn load_tasks_from_config(task_config_dir: &PathBuf) -> HashMap<u64, TaskRecord> {
     let mut tasks = HashMap::new();
-    for kind in [TaskKind::Download, TaskKind::Combine, TaskKind::Cut] {
+    for kind in [
+        TaskKind::Download,
+        TaskKind::Combine,
+        TaskKind::Cut,
+        TaskKind::Transcode,
+    ] {
         let file_path = task_config_dir.join(kind.file_name());
         let records = fs::read_to_string(file_path)
             .ok()
@@ -2090,14 +2626,16 @@ fn write_tasks_to_config(
     let mut download = Vec::new();
     let mut combine = Vec::new();
     let mut cut = Vec::new();
+    let mut transcode = Vec::new();
     for task in tasks.values().cloned() {
         match task_kind_from_payload(&task.payload) {
             TaskKind::Download => download.push(task),
             TaskKind::Combine => combine.push(task),
             TaskKind::Cut => cut.push(task),
+            TaskKind::Transcode => transcode.push(task),
         }
     }
-    for records in [&mut download, &mut combine, &mut cut] {
+    for records in [&mut download, &mut combine, &mut cut, &mut transcode] {
         records.sort_by(|left, right| right.id.cmp(&left.id));
     }
     fs::write(
@@ -2111,6 +2649,10 @@ fn write_tasks_to_config(
     fs::write(
         task_config_dir.join(TaskKind::Cut.file_name()),
         serde_json::to_string_pretty(&cut)?,
+    )?;
+    fs::write(
+        task_config_dir.join(TaskKind::Transcode.file_name()),
+        serde_json::to_string_pretty(&transcode)?,
     )?;
     Ok(())
 }
@@ -2253,7 +2795,134 @@ fn hydrate_retry_payload(payload: TaskPayload, task_dir: Option<PathBuf>) -> Tas
     }
 }
 
+fn probe_video_with_ffprobe(input: &str) -> Result<VideoProbeResponse, String> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+        ])
+        .arg(input)
+        .output()
+        .map_err(|error| format!("执行 ffprobe 失败: {}", error))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(if stderr.trim().is_empty() {
+            "ffprobe 分析失败".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| format!("解析 ffprobe 输出失败: {}", error))?;
+    let format = value
+        .get("format")
+        .and_then(|node| node.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let streams = value
+        .get("streams")
+        .and_then(|node| node.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let video_stream = streams.iter().find(|stream| {
+        stream
+            .get("codec_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            == "video"
+    });
+    let audio_stream = streams.iter().find(|stream| {
+        stream
+            .get("codec_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            == "audio"
+    });
+
+    Ok(VideoProbeResponse {
+        format_name: format
+            .get("format_name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        duration_seconds: parse_ffprobe_f64(format.get("duration")),
+        size_bytes: parse_ffprobe_u64(format.get("size")),
+        overall_bitrate: parse_ffprobe_u64(format.get("bit_rate")),
+        video_codec: video_stream
+            .and_then(|stream| stream.get("codec_name"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        width: video_stream
+            .and_then(|stream| stream.get("width"))
+            .and_then(|value| value.as_i64())
+            .map(|value| value as i32),
+        height: video_stream
+            .and_then(|stream| stream.get("height"))
+            .and_then(|value| value.as_i64())
+            .map(|value| value as i32),
+        fps: video_stream
+            .and_then(|stream| stream.get("avg_frame_rate"))
+            .and_then(|value| value.as_str())
+            .and_then(parse_ffprobe_ratio),
+        video_bitrate: video_stream
+            .and_then(|stream| stream.get("bit_rate"))
+            .and_then(|value| parse_ffprobe_u64(Some(value))),
+        audio_codec: audio_stream
+            .and_then(|stream| stream.get("codec_name"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        audio_channels: audio_stream
+            .and_then(|stream| stream.get("channels"))
+            .and_then(|value| value.as_i64())
+            .map(|value| value as i32),
+        audio_sample_rate: audio_stream
+            .and_then(|stream| stream.get("sample_rate"))
+            .and_then(|value| value.as_str())
+            .and_then(|value| value.parse::<i32>().ok()),
+        audio_bitrate: audio_stream
+            .and_then(|stream| stream.get("bit_rate"))
+            .and_then(|value| parse_ffprobe_u64(Some(value))),
+    })
+}
+
+fn parse_ffprobe_ratio(value: &str) -> Option<f64> {
+    let mut parts = value.split('/');
+    let numerator = parts.next()?.trim().parse::<f64>().ok()?;
+    let denominator = parts.next()?.trim().parse::<f64>().ok()?;
+    if parts.next().is_some() || denominator <= 0.0 {
+        return None;
+    }
+    Some(numerator / denominator)
+}
+
+fn parse_ffprobe_f64(value: Option<&serde_json::Value>) -> Option<f64> {
+    value.and_then(|node| match node {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    })
+}
+
+fn parse_ffprobe_u64(value: Option<&serde_json::Value>) -> Option<u64> {
+    value.and_then(|node| match node {
+        serde_json::Value::Number(number) => number.as_u64(),
+        serde_json::Value::String(text) => text.parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
 fn default_header_presets() -> Vec<HeaderPreset> {
+    vec![]
+}
+
+fn default_transcode_presets() -> Vec<TranscodePreset> {
     vec![]
 }
 
@@ -2274,6 +2943,25 @@ fn load_header_presets(path: &PathBuf) -> Vec<HeaderPreset> {
         .and_then(|content| serde_json::from_str::<Vec<HeaderPreset>>(&content).ok())
         .unwrap_or_default();
     merge_header_presets(default_header_presets(), presets)
+}
+
+fn ensure_transcode_presets_file(path: &PathBuf) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        return Ok(());
+    }
+    write_transcode_presets(path, &default_transcode_presets())
+}
+
+fn load_transcode_presets(path: &PathBuf) -> Vec<TranscodePreset> {
+    let mut presets = fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Vec<TranscodePreset>>(&content).ok())
+        .unwrap_or_else(default_transcode_presets);
+    presets.sort_by(|left, right| left.title.cmp(&right.title));
+    presets
 }
 
 fn merge_header_presets(
@@ -2300,6 +2988,11 @@ fn merge_header_presets(
 }
 
 fn write_header_presets(path: &PathBuf, presets: &[HeaderPreset]) -> std::io::Result<()> {
+    let content = serde_json::to_string_pretty(presets)?;
+    fs::write(path, content)
+}
+
+fn write_transcode_presets(path: &PathBuf, presets: &[TranscodePreset]) -> std::io::Result<()> {
     let content = serde_json::to_string_pretty(presets)?;
     fs::write(path, content)
 }

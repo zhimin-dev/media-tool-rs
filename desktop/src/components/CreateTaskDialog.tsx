@@ -2,8 +2,8 @@ import type { Dispatch, SetStateAction } from 'react'
 import { useState } from 'react'
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, FormControlLabel, InputAdornment, InputLabel, List, ListItem, ListItemText, MenuItem, Paper, Select, Stack, Switch, TextField, Typography } from '@mui/material'
 import type { TaskPage } from '../appPages'
-import { uploadVideo } from '../api'
-import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset } from '../types'
+import { probeVideo, uploadVideo } from '../api'
+import type { CombinePayload, CutPayload, DownloadPayload, HeaderPreset, TranscodePayload, TranscodePreset, VideoProbeInfo } from '../types'
 
 type CreateTaskDialogProps = {
   open: boolean
@@ -14,16 +14,22 @@ type CreateTaskDialogProps = {
   downloadForm: DownloadPayload
   combineForm: CombinePayload
   cutForm: CutPayload
+  transcodeForm: TranscodePayload
   headerPresets: HeaderPreset[]
+  transcodePresets: TranscodePreset[]
   selectedPresetHost: string
   selectedPreset: HeaderPreset | null
   matchedPresetHost: string
+  selectedTranscodePresetTitle: string
   onPresetChange: (host: string) => void
+  onTranscodePresetChange: (title: string) => void
   onDownloadFormChange: Dispatch<SetStateAction<DownloadPayload>>
   onCombineFormChange: Dispatch<SetStateAction<CombinePayload>>
   onCutFormChange: Dispatch<SetStateAction<CutPayload>>
+  onTranscodeFormChange: Dispatch<SetStateAction<TranscodePayload>>
   onClose: () => void
   onManageHeaders: () => void
+  onManageTranscodePresets: () => void
   onSubmit: () => void
 }
 
@@ -44,16 +50,22 @@ function CreateTaskDialog({
   downloadForm,
   combineForm,
   cutForm,
+  transcodeForm,
   headerPresets,
+  transcodePresets,
   selectedPresetHost,
   selectedPreset,
   matchedPresetHost,
+  selectedTranscodePresetTitle,
   onPresetChange,
+  onTranscodePresetChange,
   onDownloadFormChange,
   onCombineFormChange,
   onCutFormChange,
+  onTranscodeFormChange,
   onClose,
   onManageHeaders,
+  onManageTranscodePresets,
   onSubmit,
 }: CreateTaskDialogProps) {
   const [testedKey, setTestedKey] = useState<string | null>(null)
@@ -62,6 +74,73 @@ function CreateTaskDialog({
   const [combineUploadLoading, setCombineUploadLoading] = useState(false)
   const [combineUploadError, setCombineUploadError] = useState('')
   const [combineUploadSubDir] = useState(() => generateRandomString(12))
+  const [transcodeUploadLoading, setTranscodeUploadLoading] = useState(false)
+  const [transcodeProbeLoading, setTranscodeProbeLoading] = useState(false)
+  const [transcodeError, setTranscodeError] = useState('')
+  const [videoProbeInfo, setVideoProbeInfo] = useState<VideoProbeInfo | null>(null)
+
+  const handleTranscodeFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    event.target.value = ''
+    setTranscodeUploadLoading(true)
+    setTranscodeError('')
+    try {
+      const uploaded = await uploadVideo(file, {
+        rootDir: 'uploads',
+        preserveFileName: true,
+      })
+      onTranscodeFormChange((current) => ({
+        ...current,
+        input: uploaded.path,
+      }))
+      setVideoProbeInfo(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '上传转码文件失败'
+      setTranscodeError(message)
+    } finally {
+      setTranscodeUploadLoading(false)
+    }
+  }
+
+  const handleProbeVideo = async () => {
+    if (!transcodeForm.input.trim()) {
+      setTranscodeError('请先上传或填写输入视频路径')
+      return
+    }
+    setTranscodeProbeLoading(true)
+    setTranscodeError('')
+    try {
+      const result = await probeVideo(transcodeForm.input)
+      setVideoProbeInfo(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '分析视频失败'
+      setTranscodeError(message)
+    } finally {
+      setTranscodeProbeLoading(false)
+    }
+  }
+
+  const selectedTranscodePreset = transcodePresets.find((item) => item.title === selectedTranscodePresetTitle) ?? null
+
+  const handleApplyTranscodePreset = (title: string) => {
+    onTranscodePresetChange(title)
+    const preset = transcodePresets.find((item) => item.title === title)
+    if (!preset) {
+      return
+    }
+    onTranscodeFormChange((current) => ({
+      ...current,
+      video_codec: preset.video_codec,
+      resolution: preset.resolution,
+      video_bitrate_kbps: preset.video_bitrate_kbps,
+      fps: preset.fps,
+      audio_codec: preset.audio_codec,
+      audio_bitrate_kbps: preset.audio_bitrate_kbps,
+      audio_channels: preset.audio_channels,
+      audio_sample_rate: preset.audio_sample_rate,
+    }))
+  }
 
   // Derive tested: true only when the snapshot matches the current form values
   const formKey = [
@@ -327,6 +406,153 @@ function CreateTaskDialog({
               type="number"
               value={cutForm.duration}
               onChange={(event) => onCutFormChange((current) => ({ ...current, duration: Number(event.target.value) }))}
+            />
+          </Stack>
+        ) : null}
+        {page === 'transcode' ? (
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {transcodeError ? <Alert severity="error">{transcodeError}</Alert> : null}
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+              <TextField
+                fullWidth
+                label="输入视频文件"
+                value={transcodeForm.input}
+                onChange={(event) => onTranscodeFormChange((current) => ({ ...current, input: event.target.value }))}
+                helperText="支持上传后自动填充，也可手动填写绝对路径"
+              />
+              <Button variant="outlined" component="label" sx={{ mt: 0.5, whiteSpace: 'nowrap', minWidth: 100 }}>
+                {transcodeUploadLoading ? '上传中...' : '上传视频'}
+                <input type="file" accept="video/*" hidden onChange={handleTranscodeFilePick} />
+              </Button>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button variant="outlined" onClick={() => void handleProbeVideo()} disabled={transcodeProbeLoading}>
+                {transcodeProbeLoading ? '分析中...' : '分析视频信息'}
+              </Button>
+              <Button variant="outlined" onClick={onManageTranscodePresets}>
+                管理转码常用设置
+              </Button>
+            </Stack>
+            <FormControl fullWidth>
+              <InputLabel id="transcode-preset-label">转码常用设置</InputLabel>
+              <Select
+                labelId="transcode-preset-label"
+                label="转码常用设置"
+                value={selectedTranscodePresetTitle}
+                onChange={(event) => handleApplyTranscodePreset(event.target.value)}
+              >
+                <MenuItem value="">不使用预设</MenuItem>
+                {transcodePresets.map((preset) => (
+                  <MenuItem key={preset.title} value={preset.title}>
+                    {preset.title}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {selectedTranscodePreset ? (
+              <Typography variant="body2" color="text.secondary">
+                已应用预设：{selectedTranscodePreset.title}
+              </Typography>
+            ) : null}
+            {videoProbeInfo ? (
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <Stack spacing={0.5}>
+                  <Typography variant="subtitle2">视频分析结果（ffprobe）</Typography>
+                  <Typography variant="body2">封装格式：{videoProbeInfo.format_name || '--'}</Typography>
+                  <Typography variant="body2">时长：{videoProbeInfo.duration_seconds ? `${videoProbeInfo.duration_seconds.toFixed(2)}s` : '--'}</Typography>
+                  <Typography variant="body2">视频：{videoProbeInfo.video_codec || '--'} / {videoProbeInfo.width ?? '--'} x {videoProbeInfo.height ?? '--'} / {videoProbeInfo.fps ? `${videoProbeInfo.fps.toFixed(2)}fps` : '--'}</Typography>
+                  <Typography variant="body2">视频码率：{videoProbeInfo.video_bitrate ? `${Math.round(videoProbeInfo.video_bitrate / 1000)} kbps` : '--'}</Typography>
+                  <Typography variant="body2">音频：{videoProbeInfo.audio_codec || '--'} / {videoProbeInfo.audio_channels ?? '--'} 声道 / {videoProbeInfo.audio_sample_rate ?? '--'} Hz</Typography>
+                  <Typography variant="body2">音频码率：{videoProbeInfo.audio_bitrate ? `${Math.round(videoProbeInfo.audio_bitrate / 1000)} kbps` : '--'}</Typography>
+                </Stack>
+              </Paper>
+            ) : null}
+            <TextField
+              fullWidth
+              label="输出文件名"
+              value={transcodeForm.target_file_name}
+              helperText="可选，不填时自动生成"
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, target_file_name: event.target.value }))}
+            />
+            <FormControl fullWidth>
+              <InputLabel id="video-codec-label">视频编码</InputLabel>
+              <Select
+                labelId="video-codec-label"
+                label="视频编码"
+                value={transcodeForm.video_codec}
+                onChange={(event) => onTranscodeFormChange((current) => ({ ...current, video_codec: event.target.value }))}
+              >
+                <MenuItem value="">跟随原视频</MenuItem>
+                <MenuItem value="h264">H.264 (libx264)</MenuItem>
+                <MenuItem value="h265">H.265 (libx265)</MenuItem>
+                <MenuItem value="copy">拷贝不转码</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel id="resolution-label">分辨率</InputLabel>
+              <Select
+                labelId="resolution-label"
+                label="分辨率"
+                value={transcodeForm.resolution}
+                onChange={(event) => onTranscodeFormChange((current) => ({ ...current, resolution: event.target.value }))}
+              >
+                <MenuItem value="">跟随原视频</MenuItem>
+                <MenuItem value="1080p">1080p</MenuItem>
+                <MenuItem value="720p">720p</MenuItem>
+                <MenuItem value="480p">480p</MenuItem>
+                <MenuItem value="360p">360p</MenuItem>
+                <MenuItem value="1920x1080">1920x1080</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              label="视频码率 (kbps)"
+              type="number"
+              value={transcodeForm.video_bitrate_kbps}
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, video_bitrate_kbps: Number(event.target.value) }))}
+            />
+            <TextField
+              fullWidth
+              label="FPS"
+              type="number"
+              value={transcodeForm.fps}
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, fps: Number(event.target.value) }))}
+            />
+            <FormControl fullWidth>
+              <InputLabel id="audio-codec-label">音频编码</InputLabel>
+              <Select
+                labelId="audio-codec-label"
+                label="音频编码"
+                value={transcodeForm.audio_codec}
+                onChange={(event) => onTranscodeFormChange((current) => ({ ...current, audio_codec: event.target.value }))}
+              >
+                  <MenuItem value="">跟随原视频</MenuItem>
+                <MenuItem value="aac">AAC</MenuItem>
+                <MenuItem value="mp3">MP3</MenuItem>
+                <MenuItem value="opus">Opus</MenuItem>
+                <MenuItem value="copy">拷贝不转码</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              label="音频码率 (kbps)"
+              type="number"
+              value={transcodeForm.audio_bitrate_kbps}
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, audio_bitrate_kbps: Number(event.target.value) }))}
+            />
+            <TextField
+              fullWidth
+              label="声道数"
+              type="number"
+              value={transcodeForm.audio_channels}
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, audio_channels: Number(event.target.value) }))}
+            />
+            <TextField
+              fullWidth
+              label="采样率 (Hz)"
+              type="number"
+              value={transcodeForm.audio_sample_rate}
+              onChange={(event) => onTranscodeFormChange((current) => ({ ...current, audio_sample_rate: Number(event.target.value) }))}
             />
           </Stack>
         ) : null}

@@ -7,14 +7,17 @@ import {
   clearCombineUnusedFiles,
   createTask,
   clearTaskTempFiles,
+  deleteTranscodePreset,
   deleteHeaderPreset,
   deleteTask,
   fetchHeaderPresets,
+  fetchTranscodePresets,
   getAppVersion,
   getApiConnectionStatus,
   fetchTaskDetail,
   fetchTasks,
   retryTask,
+  saveTranscodePreset,
   saveHeaderPreset,
   updateTaskBaseInfo,
 } from './api'
@@ -27,6 +30,7 @@ import CutPage from './pages/CutPage'
 import CutCreatePage from './pages/CutCreatePage'
 import DownloadPage from './pages/DownloadPage'
 import HeaderPresetsPage from './pages/HeaderPresetsPage'
+import TranscodePage from './pages/TranscodePage'
 import WatchPage from './pages/WatchPage'
 import type {
   BaseInfo,
@@ -38,6 +42,8 @@ import type {
   TaskDetail,
   TaskPayload,
   TaskRecord,
+  TranscodePayload,
+  TranscodePreset,
 } from './types'
 
 const defaultApiStatus: ApiConnectionStatus = {
@@ -83,6 +89,32 @@ const defaultCutForm: CutPayload = {
 delete_input_file: false,
 }
 
+const defaultTranscodeForm: TranscodePayload = {
+  kind: 'transcode',
+  input: '',
+  target_file_name: '',
+  video_codec: '',
+  resolution: '',
+  video_bitrate_kbps: 0,
+  fps: 0,
+  audio_codec: '',
+  audio_bitrate_kbps: 0,
+  audio_channels: 0,
+  audio_sample_rate: 0,
+}
+
+const defaultTranscodePresetForm: TranscodePreset = {
+  title: '',
+  video_codec: '',
+  resolution: '',
+  video_bitrate_kbps: 0,
+  fps: 0,
+  audio_codec: '',
+  audio_bitrate_kbps: 0,
+  audio_channels: 0,
+  audio_sample_rate: 0,
+}
+
 const defaultBaseInfoForm: BaseInfo = {
   url: '',
   m3u8_name: '',
@@ -112,6 +144,7 @@ function App() {
   const [downloadForm, setDownloadForm] = useState(defaultDownloadForm)
   const [combineForm, setCombineForm] = useState(defaultCombineForm)
   const [cutForm, setCutForm] = useState(defaultCutForm)
+  const [transcodeForm, setTranscodeForm] = useState(defaultTranscodeForm)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -127,6 +160,11 @@ function App() {
   const [presetFormRows, setPresetFormRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
   const [editingPresetHost, setEditingPresetHost] = useState('')
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
+  const [transcodePresets, setTranscodePresets] = useState<TranscodePreset[]>([])
+  const [selectedTranscodePresetTitle, setSelectedTranscodePresetTitle] = useState('')
+  const [transcodePresetDialogOpen, setTranscodePresetDialogOpen] = useState(false)
+  const [editingTranscodePresetTitle, setEditingTranscodePresetTitle] = useState('')
+  const [transcodePresetForm, setTranscodePresetForm] = useState<TranscodePreset>(defaultTranscodePresetForm)
   const [apiStatus, setApiStatus] = useState<ApiConnectionStatus>(defaultApiStatus)
   const [appVersion, setAppVersion] = useState('unknown')
 
@@ -200,6 +238,28 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let alive = true
+
+    const loadTranscodePresets = async () => {
+      try {
+        const presets = await fetchTranscodePresets()
+        if (alive) {
+          setTranscodePresets(presets)
+        }
+      } catch {
+        if (alive) {
+          setError('加载转码预设失败')
+        }
+      }
+    }
+
+    void loadTranscodePresets()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       const version = await getAppVersion()
       setAppVersion(version)
@@ -236,6 +296,7 @@ function App() {
     () => tasks.filter((task) => task.payload.kind === 'cut' || task.payload.kind === 'cut_batch'),
     [tasks],
   )
+  const transcodeTasks = useMemo(() => tasks.filter((task) => task.payload.kind === 'transcode'), [tasks])
 
   const currentPayload = useMemo<TaskPayload>(() => {
     if (currentTaskPage === 'download') {
@@ -247,8 +308,11 @@ function App() {
     if (currentTaskPage === 'combine') {
       return combineForm
     }
+    if (currentTaskPage === 'transcode') {
+      return transcodeForm
+    }
     return cutForm
-  }, [combineForm, currentTaskPage, cutForm, downloadForm, selectedPreset])
+  }, [combineForm, currentTaskPage, cutForm, downloadForm, selectedPreset, transcodeForm])
 
   const createTitle = `新建${pageLabelMap[currentTaskPage]}任务`
   const commandPreview = buildCommandPreview(currentPayload)
@@ -392,6 +456,66 @@ function App() {
     }
   }
 
+  const resetTranscodePresetForm = () => {
+    setEditingTranscodePresetTitle('')
+    setTranscodePresetForm(defaultTranscodePresetForm)
+  }
+
+  const handleOpenNewTranscodePreset = () => {
+    resetTranscodePresetForm()
+    setTranscodePresetDialogOpen(true)
+  }
+
+  const handleEditTranscodePreset = (preset: TranscodePreset) => {
+    setEditingTranscodePresetTitle(preset.title)
+    setTranscodePresetForm(preset)
+    setTranscodePresetDialogOpen(true)
+  }
+
+  const handleSaveTranscodePreset = async () => {
+    const title = transcodePresetForm.title.trim()
+    if (!title) {
+      setError('请填写转码预设标题')
+      return
+    }
+    try {
+      const saved = await saveTranscodePreset({
+        ...transcodePresetForm,
+        title,
+      })
+      setTranscodePresets((current) => {
+        const next = current.filter((item) => item.title !== saved.title)
+        next.push(saved)
+        next.sort((left, right) => left.title.localeCompare(right.title))
+        return next
+      })
+      setSelectedTranscodePresetTitle(saved.title)
+      setTranscodePresetDialogOpen(false)
+      setSuccessMessage('转码预设已保存')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '保存转码预设失败'
+      setError(message)
+    }
+  }
+
+  const handleDeleteTranscodePreset = async (title: string) => {
+    try {
+      await deleteTranscodePreset(title)
+      setTranscodePresets((current) => current.filter((item) => item.title !== title))
+      setSelectedTranscodePresetTitle((current) => (current === title ? '' : current))
+      if (editingTranscodePresetTitle === title) {
+        resetTranscodePresetForm()
+        setTranscodePresetDialogOpen(false)
+      }
+      setSuccessMessage('转码预设已删除')
+      setError('')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '删除转码预设失败'
+      setError(message)
+    }
+  }
+
   const handleRetry = async (taskId: number) => {
     try {
       const task = await retryTask(taskId)
@@ -462,7 +586,7 @@ function App() {
     if (task.payload.kind === 'download') {
       videoUrl = `/static/download/${task.payload.folder}/${task.payload.target_file_name}`
     } else {
-      // combine and cut — use the serve-video API with the absolute result path
+      // combine/cut/transcode use the serve-video API with the absolute result path
       videoUrl = `/api/serve-video?path=${encodeURIComponent(task.result_path)}`
     }
     setPlayerUrl(videoUrl)
@@ -622,6 +746,27 @@ function App() {
                 />
               }
             />
+            <Route
+              path="/transcode"
+              element={
+                <TranscodePage
+                  tasks={transcodeTasks}
+                  refreshInterval={taskRefreshInterval}
+                  baseInfoEditLoading={baseInfoEditLoading}
+                  onCreate={() => {
+                    setTranscodeForm(defaultTranscodeForm)
+                    setSelectedTranscodePresetTitle('')
+                    setCreateDialogOpen(true)
+                  }}
+                  onRefresh={() => void handleManualRefresh()}
+                  onRefreshIntervalChange={setTaskRefreshInterval}
+                  onView={(taskId) => void handleView(taskId)}
+                  onRetry={(taskId) => void handleRetry(taskId)}
+                  onDelete={(taskId) => void handleDelete(taskId)}
+                  onOpenVideo={handleOpenVideo}
+                />
+              }
+            />
             <Route path="/cut/create" element={<CutCreatePage />} />
             <Route
               path="/settings"
@@ -645,6 +790,16 @@ function App() {
                   onSavePreset={() => void handleSavePreset()}
                   onEditPreset={handleEditPreset}
                   onDeletePreset={(host) => void handleDeletePreset(host)}
+                  transcodePresets={transcodePresets}
+                  transcodePresetDialogOpen={transcodePresetDialogOpen}
+                  editingTranscodePresetTitle={editingTranscodePresetTitle}
+                  transcodePresetForm={transcodePresetForm}
+                  onOpenNewTranscodePreset={handleOpenNewTranscodePreset}
+                  onCloseTranscodePresetDialog={() => setTranscodePresetDialogOpen(false)}
+                  onTranscodePresetFormChange={(key, value) => setTranscodePresetForm((current) => ({ ...current, [key]: value } as TranscodePreset))}
+                  onSaveTranscodePreset={() => void handleSaveTranscodePreset()}
+                  onEditTranscodePreset={handleEditTranscodePreset}
+                  onDeleteTranscodePreset={(title) => void handleDeleteTranscodePreset(title)}
                 />
               }
             />
@@ -677,16 +832,25 @@ function App() {
         downloadForm={downloadForm}
         combineForm={combineForm}
         cutForm={cutForm}
+        transcodeForm={transcodeForm}
         headerPresets={headerPresets}
+        transcodePresets={transcodePresets}
         selectedPresetHost={selectedPresetHost}
         selectedPreset={selectedPreset}
         matchedPresetHost={matchedPresetHost}
+        selectedTranscodePresetTitle={selectedTranscodePresetTitle}
         onPresetChange={setSelectedPresetHost}
+        onTranscodePresetChange={setSelectedTranscodePresetTitle}
         onDownloadFormChange={setDownloadForm}
         onCombineFormChange={setCombineForm}
         onCutFormChange={setCutForm}
+        onTranscodeFormChange={setTranscodeForm}
         onClose={() => setCreateDialogOpen(false)}
         onManageHeaders={() => {
+          setCreateDialogOpen(false)
+          navigate(getPathForPage('settings'))
+        }}
+        onManageTranscodePresets={() => {
           setCreateDialogOpen(false)
           navigate(getPathForPage('settings'))
         }}
@@ -784,6 +948,37 @@ function buildCommandPreview(payload: TaskPayload) {
       }
       return parts.join(' ')
     }
+    case 'transcode': {
+      const parts = ['media-tool-rs transcode', `-i=${shellDoubleQuote(payload.input)}`]
+      if (payload.target_file_name.trim()) {
+        parts.push(`--target_file_name=${shellDoubleQuote(payload.target_file_name)}`)
+      }
+      if (payload.video_codec.trim()) {
+        parts.push(`--video_codec=${payload.video_codec}`)
+      }
+      if (payload.resolution.trim()) {
+        parts.push(`--resolution=${payload.resolution}`)
+      }
+      if (payload.video_bitrate_kbps > 0) {
+        parts.push(`--video_bitrate_kbps=${payload.video_bitrate_kbps}`)
+      }
+      if (payload.fps > 0) {
+        parts.push(`--fps=${payload.fps}`)
+      }
+      if (payload.audio_codec.trim()) {
+        parts.push(`--audio_codec=${payload.audio_codec}`)
+      }
+      if (payload.audio_bitrate_kbps > 0) {
+        parts.push(`--audio_bitrate_kbps=${payload.audio_bitrate_kbps}`)
+      }
+      if (payload.audio_channels > 0) {
+        parts.push(`--audio_channels=${payload.audio_channels}`)
+      }
+      if (payload.audio_sample_rate > 0) {
+        parts.push(`--audio_sample_rate=${payload.audio_sample_rate}`)
+      }
+      return parts.join(' ')
+    }
   }
 }
 
@@ -809,6 +1004,15 @@ function validatePayload(payload: TaskPayload) {
       if (payload.duration <= 0) {
         throw new Error('持续时长必须大于 0')
       }
+      return
+    case 'transcode':
+      if (!payload.input.trim()) {
+        throw new Error('请填写输入视频文件路径')
+      }
+      if (payload.fps < 0 || payload.video_bitrate_kbps < 0 || payload.audio_bitrate_kbps < 0) {
+        throw new Error('转码参数不能为负数')
+      }
+      return
   }
 }
 

@@ -6,6 +6,8 @@ import type {
   TaskDetail,
   TaskKind,
   TaskRecord,
+  TranscodePreset,
+  VideoProbeInfo,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -259,5 +261,42 @@ export async function deleteHeaderPreset(host: string): Promise<void> {
   if (!response.ok) {
     const message = await response.text()
     throw new Error(message || '删除预设失败')
+  }
+}
+
+export async function probeVideo(input: string): Promise<VideoProbeInfo> {
+  const response = await apiFetch('/video-probe', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input }),
+  })
+  return parseResponse<VideoProbeInfo>(response)
+}
+
+export async function fetchTranscodePresets(): Promise<TranscodePreset[]> {
+  const response = await apiFetch('/transcode-presets')
+  return parseResponse<TranscodePreset[]>(response)
+}
+
+export async function saveTranscodePreset(request: TranscodePreset): Promise<TranscodePreset> {
+  const response = await apiFetch('/transcode-presets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
+  return parseResponse<TranscodePreset>(response)
+}
+
+export async function deleteTranscodePreset(title: string): Promise<void> {
+  const response = await apiFetch(`/transcode-presets/${encodeURIComponent(title)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || '删除转码预设失败')
   }
 }

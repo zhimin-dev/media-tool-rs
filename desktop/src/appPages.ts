@@ -1,10 +1,11 @@
-export type TaskPage = 'download' | 'combine' | 'cut'
+export type TaskPage = 'download' | 'combine' | 'cut' | 'transcode'
 export type AppPage = TaskPage | 'settings' | 'watch'
 
 export const appPages: Array<{ key: AppPage; label: string; path: string }> = [
   { key: 'download', label: '下载', path: '/download' },
   { key: 'combine', label: '合并', path: '/combine' },
   { key: 'cut', label: '截取', path: '/cut' },
+  { key: 'transcode', label: '转码', path: '/transcode' },
   { key: 'watch', label: '播放', path: '/watch' },
   { key: 'settings', label: '设置', path: '/settings' },
 ]
@@ -14,7 +15,7 @@ export const pageLabelMap: Record<AppPage, string> = Object.fromEntries(
 ) as Record<AppPage, string>
 
 export function isTaskPage(page: AppPage): page is TaskPage {
-  return page === 'download' || page === 'combine' || page === 'cut'
+  return page === 'download' || page === 'combine' || page === 'cut' || page === 'transcode'
 }
 
 export function getPageFromPath(pathname: string): AppPage {

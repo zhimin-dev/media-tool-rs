@@ -116,6 +116,11 @@ function TaskListPage({
                         打开播放
                       </Button>
                     ) : null}
+                    {task.payload.kind === 'transcode' && task.status === 'success' && task.result_path && onOpenVideo ? (
+                      <Button variant="outlined" size="small" onClick={() => onOpenVideo(task)}>
+                        打开播放
+                      </Button>
+                    ) : null}
                     {task.payload.kind === 'download' && task.status === 'failed' && onEditFailedTask ? (
                       <Button
                         variant="outlined"

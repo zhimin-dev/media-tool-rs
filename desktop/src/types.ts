@@ -48,7 +48,21 @@ export type CutBatchPayload = {
   segments: CutSegment[]
 }
 
-export type TaskPayload = DownloadPayload | CombinePayload | CutPayload | CutBatchPayload
+export type TranscodePayload = {
+  kind: 'transcode'
+  input: string
+  target_file_name: string
+  video_codec: string
+  resolution: string
+  video_bitrate_kbps: number
+  fps: number
+  audio_codec: string
+  audio_bitrate_kbps: number
+  audio_channels: number
+  audio_sample_rate: number
+}
+
+export type TaskPayload = DownloadPayload | CombinePayload | CutPayload | CutBatchPayload | TranscodePayload
 export type TaskKind = TaskPayload['kind']
 
 export type TaskStatus = 'queued' | 'running' | 'success' | 'failed'
@@ -102,4 +116,32 @@ export type BaseInfo = {
 export type HeaderRow = {
   key: string
   value: string
+}
+
+export type VideoProbeInfo = {
+  format_name: string
+  duration_seconds: number | null
+  size_bytes: number | null
+  overall_bitrate: number | null
+  video_codec: string | null
+  width: number | null
+  height: number | null
+  fps: number | null
+  video_bitrate: number | null
+  audio_codec: string | null
+  audio_channels: number | null
+  audio_sample_rate: number | null
+  audio_bitrate: number | null
+}
+
+export type TranscodePreset = {
+  title: string
+  video_codec: string
+  resolution: string
+  video_bitrate_kbps: number
+  fps: number
+  audio_codec: string
+  audio_bitrate_kbps: number
+  audio_channels: number
+  audio_sample_rate: number
 }
