@@ -46,6 +46,7 @@ const defaultDownloadForm: DownloadPayload = {
   concurrent: 10,
   download_dir: 'static/download',
   headers: {},
+  combine_retry_count: 3,
 }
 
 const defaultCombineForm: CombinePayload = {
@@ -82,6 +83,7 @@ const defaultBaseInfoForm: BaseInfo = {
   download_dir: 'static/download',
   ffmpeg_download: false,
   auto_clear_temp_files: true,
+  combine_retry_count: 3,
 }
 
 function App() {
@@ -213,6 +215,7 @@ function App() {
       concurrent: baseInfoForm.concurrent,
       download_dir: baseInfoForm.download_dir,
       headers: baseInfoForm.header,
+      combine_retry_count: baseInfoForm.combine_retry_count,
     }
     return buildCommandPreview(payload)
   }, [baseInfoForm])
@@ -426,6 +429,7 @@ function App() {
         ffmpeg_download: payload.ffmpeg_download,
         auto_clear_temp_files: payload.auto_clear_temp_files,
         header: payload.headers,
+        combine_retry_count: payload.combine_retry_count,
       }
       setBaseInfoEditingTaskId(taskId)
       setBaseInfoForm(source)
@@ -676,6 +680,9 @@ function buildCommandPreview(payload: TaskPayload) {
       }
       if (Object.keys(payload.headers).length > 0) {
         parts.push(`--header=${formatHeaderCommandValue(payload.headers)}`)
+      }
+      if (payload.combine_retry_count !== 3) {
+        parts.push(`--combine_retry_count=${payload.combine_retry_count}`)
       }
       return parts.join(' ')
     }

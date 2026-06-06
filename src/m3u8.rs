@@ -11,6 +11,7 @@ pub struct HlsM3u8 {
     pub sequence: i32, //序号
     pub x_map_uri: String,
     pub extension: String, //视频扩展字段
+    pub total_duration: f64, // m3u8 中所有分片时长之和（秒）
     headers: HashMap<String, String>,
 }
 
@@ -32,6 +33,7 @@ impl HlsM3u8 {
             sequence: 0,
             x_map_uri: "".to_string(),
             extension: "ts".to_string(),
+            total_duration: 0.0,
             headers: HashMap::new(),
         }
     }
@@ -144,6 +146,7 @@ pub mod m3u8 {
         let mut hls_m3u8 = HlsM3u8::new();
         hls_m3u8.set_original_url(url.clone(), folder.clone(), headers);
         let mut list = vec![];
+        let mut total_duration: f64 = 0.0;
         let arr = str.split("\n").into_iter();
         for i in arr {
             if !i.is_empty() {
@@ -157,7 +160,16 @@ pub mod m3u8 {
                         }
                     }
                 } else {
-                    if i.starts_with("#EXT-X-KEY") {
+                    if i.starts_with("#EXTINF:") {
+                        let duration_str = i
+                            .trim_start_matches("#EXTINF:")
+                            .split(',')
+                            .next()
+                            .unwrap_or("0");
+                        if let Ok(d) = duration_str.trim().parse::<f64>() {
+                            total_duration += d;
+                        }
+                    } else if i.starts_with("#EXT-X-KEY") {
                         let method = get_method_from_regex(i);
                         let uri = get_uri_from_regex(i);
                         let iv = get_iv_from_regex(i);
@@ -179,6 +191,7 @@ pub mod m3u8 {
             }
         }
         hls_m3u8.set_list(list);
+        hls_m3u8.total_duration = total_duration;
         hls_m3u8
     }
 

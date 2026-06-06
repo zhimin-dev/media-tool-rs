@@ -296,6 +296,7 @@ impl DownloadArgs {
                         self.download_dir.clone(),
                         self.ffmpeg_download,
                         self.auto_clear_temp_files,
+                        3,
                     )
                     .await
                     .expect("下载失败");

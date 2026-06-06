@@ -75,6 +75,19 @@ function BaseInfoEditDialog({
           />
           <TextField
             fullWidth
+            label="合并重试次数"
+            type="number"
+            value={baseInfoForm.combine_retry_count}
+            onChange={(event) =>
+              onBaseInfoFormChange((current) => ({
+                ...current,
+                combine_retry_count: Number(event.target.value),
+              }))
+            }
+            helperText="合并视频后若时长不符则重试，默认 3 次"
+          />
+          <TextField
+            fullWidth
             label="Header JSON"
             value={baseInfoHeaderText}
             onChange={(event) => onBaseInfoHeaderTextChange(event.target.value)}
