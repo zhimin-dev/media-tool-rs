@@ -3,11 +3,13 @@ import { Alert, AppBar, Box, Container, IconButton, Menu, MenuItem, Stack, Toolb
 import { useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
+  type ApiConnectionStatus,
   createTask,
   clearTaskTempFiles,
   deleteHeaderPreset,
   deleteTask,
   fetchHeaderPresets,
+  getAppVersion,
   getApiConnectionStatus,
   fetchTaskDetail,
   fetchTasks,
@@ -36,6 +38,12 @@ import type {
   TaskPayload,
   TaskRecord,
 } from './types'
+
+const defaultApiStatus: ApiConnectionStatus = {
+  apiBase: 'unknown',
+  healthy: false,
+  message: 'checking...',
+}
 
 const defaultDownloadForm: DownloadPayload = {
   kind: 'download',
@@ -118,17 +126,12 @@ function App() {
   const [presetFormRows, setPresetFormRows] = useState<HeaderRow[]>([{ key: '', value: '' }])
   const [editingPresetHost, setEditingPresetHost] = useState('')
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
-  const [apiStatusText, setApiStatusText] = useState('API: checking...')
-  const [apiHealthy, setApiHealthy] = useState<boolean | null>(null)
+  const [apiStatus, setApiStatus] = useState<ApiConnectionStatus>(defaultApiStatus)
+  const [appVersion, setAppVersion] = useState('unknown')
 
   const updateApiStatus = async () => {
     const status = await getApiConnectionStatus()
-    setApiHealthy(status.healthy)
-    setApiStatusText(
-      status.healthy
-        ? `API: connected (${status.apiBase})`
-        : `API: disconnected (${status.apiBase}) - ${status.message}`,
-    )
+    setApiStatus(status)
     return status
   }
 
@@ -196,18 +199,20 @@ function App() {
   }, [])
 
   useEffect(() => {
+    void (async () => {
+      const version = await getAppVersion()
+      setAppVersion(version)
+    })()
+  }, [])
+
+  useEffect(() => {
     let alive = true
     const refreshApiStatus = async () => {
       const status = await getApiConnectionStatus()
       if (!alive) {
         return
       }
-      setApiHealthy(status.healthy)
-      setApiStatusText(
-        status.healthy
-          ? `API: connected (${status.apiBase})`
-          : `API: disconnected (${status.apiBase}) - ${status.message}`,
-      )
+      setApiStatus(status)
     }
     void refreshApiStatus()
     const timer = window.setInterval(() => void refreshApiStatus(), 3000)
@@ -543,7 +548,6 @@ function App() {
 
       <Container maxWidth="lg" sx={{ py: 3 }}>
         <Stack spacing={2}>
-          <Alert severity={apiHealthy === false ? 'warning' : 'info'}>{apiStatusText}</Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {successMessage ? <Alert severity="success">{successMessage}</Alert> : null}
 
@@ -607,9 +611,11 @@ function App() {
             />
             <Route path="/cut/create" element={<CutCreatePage />} />
             <Route
-              path="/headers"
+              path="/settings"
               element={
                 <HeaderPresetsPage
+                  apiStatus={apiStatus}
+                  appVersion={appVersion}
                   headerPresets={headerPresets}
                   presetDialogOpen={presetDialogOpen}
                   editingPresetHost={editingPresetHost}
@@ -669,7 +675,7 @@ function App() {
         onClose={() => setCreateDialogOpen(false)}
         onManageHeaders={() => {
           setCreateDialogOpen(false)
-          navigate(getPathForPage('headers'))
+          navigate(getPathForPage('settings'))
         }}
         onSubmit={() => void handleCreateTask()}
       />

@@ -1,12 +1,12 @@
 export type TaskPage = 'download' | 'combine' | 'cut'
-export type AppPage = TaskPage | 'headers' | 'watch'
+export type AppPage = TaskPage | 'settings' | 'watch'
 
 export const appPages: Array<{ key: AppPage; label: string; path: string }> = [
   { key: 'download', label: '下载', path: '/download' },
   { key: 'combine', label: '合并', path: '/combine' },
   { key: 'cut', label: '截取', path: '/cut' },
-  { key: 'headers', label: 'Header 预设', path: '/headers' },
   { key: 'watch', label: '播放', path: '/watch' },
+  { key: 'settings', label: '设置', path: '/settings' },
 ]
 
 export const pageLabelMap: Record<AppPage, string> = Object.fromEntries(

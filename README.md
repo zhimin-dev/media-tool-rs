@@ -2,52 +2,12 @@
 
 一个处理媒体的常用工具
 
-## usage
+![Media Tool Icon](desktop/src-tauri/icons/icon.png)
 
-### 多个视频合并成一个
-
-比如当前有2个视频`IMG_1767.MOV`以及`IMG_1768.MOV`，需要将这2个视频合并成一个视频，
-你需要指定`-r IMG_(.*).MOV`并且指定开始的id(`--reg-file-start=`)以及结束的id(`--reg-file-end=`)
-则执行下面的命令即可,会得到一个`IMG_.MOV`的合并后的视频文件。
-
-```
-media-tool-rs combine -r IMG_\(\.\*\).MOV --reg-file-start=1767 --reg-file-end=1768 --same_param_index=1 --target_file_name=2222.mp4
-```
-
-当然也可以指定生成后的文件名，需要跟上`--target_file_name=your_filename.MOV`
-
-
-### 下载视频
-
-```
-media-tool-rs download --url=https://zmis.me/xxx.m3u8 --folder=1222
-```
-
-如果下载需要请求头，可以通过 JSON 字符串传入：
-
-```bash
-media-tool-rs download --url=https://zmis.me/xxx.m3u8 --header='{"referer":"https://zmis.me","origin":"https://zmis.me"}'
-```
-
-下载输出目录默认在 `static/download/<folder>/`。
-
-### 截取视频
-
--i 需要截取的视频
-
--s 视频开始的秒数
-
--d 截取视频的时长
-
-```
-media-tool-rs cut -i=/your/local/file.mp4 -s=5 -d=10
-```
-
-截取输出目录默认在 `static/cut/`。
 
 ## 可视化界面
 
-项目新增了一个 React + Material UI 前端，目录在 `/tmp/workspace/zhimin-dev/media-tool-rs/desktop`。
+项目包含一个 React + Material UI 前端，目录在 `desktop/`。
 
 ### 1. 启动后端接口
 
@@ -98,8 +58,10 @@ npm run dev:with-server
 
 ### 2.1 打包后（tauri build）说明
 
-- 应用启动时会在后台自动启动本地 API 服务：`http://127.0.0.1:8080/api`
+- 应用启动时会在后台自动启动本地 API 服务（随机空闲端口）
+- 运行时会将地址写入：`~/Library/Application Support/com.wj.mediatoolrs/config/runtime/server-info.json`
 - 前端会在 Tauri 运行时自动读取该地址，无需依赖 Vite 代理
+- 在应用「设置」页面可查看当前 API Host 与连接状态
 
 ### 3. 前端能力
 
@@ -107,3 +69,71 @@ npm run dev:with-server
 - 实时查看任务状态、命令预览和输出结果
 - 支持在线播放 m3u8 链接
 - 适合在 macOS、Windows 上运行
+
+### 4. 应用操作说明
+
+1. 打开应用后先进入「下载 / 合并 / 截取」页面创建任务。
+2. 任务创建后可在列表中查看状态，支持刷新、重试、删除、查看详情。
+3. 下载任务完成后可一键播放；合并/截取结果支持通过内置播放页打开。
+4. 在「设置」页面可管理 Header 预设，并查看当前 API Host、连接信息和 App 版本。
+
+### 4.1 应用操作流程图
+
+```mermaid
+flowchart TD
+	A[启动应用] --> B{选择功能页}
+	B --> C[下载任务]
+	B --> D[合并任务]
+	B --> E[截取任务]
+
+	C --> F[创建任务参数]
+	D --> F
+	E --> F
+
+	F --> G[提交任务]
+	G --> H[任务队列顺序执行]
+	H --> I{执行结果}
+
+	I -->|成功| J[产出文件写入 static 目录]
+	I -->|失败| K[查看错误并重试]
+
+	J --> L[在任务详情查看输出路径]
+	L --> M[播放页打开 m3u8 或结果文件]
+
+	A --> N[设置页]
+	N --> O[查看 App 版本]
+	N --> P[查看 API Host 与连接状态]
+	N --> Q[管理 Header 预设]
+```
+
+### 5. 当前版本变更
+
+当前版本：`1.0.0`
+
+- 新增桌面端内置 API 自动启动与动态端口发现。
+- 设置页支持显示当前 API Host 与连接状态。
+- 设置页新增显示 App 版本（读取 Tauri 配置版本）。
+- 导航调整：设置页面放到菜单最后。
+- 应用产品名更新为 **Media Tool**。
+- 更新桌面应用图标资源。
+
+### 6. GitHub Actions 自动打包桌面应用
+
+新增工作流：`.github/workflows/desktop-build.yml`
+
+- 触发条件：
+	- 手动触发（`workflow_dispatch`）
+	- 推送到 `main` 且命中桌面相关路径改动
+- 打包平台：macOS / Linux / Windows
+- 输出产物：作为 GitHub Actions Artifacts 上传（对应各平台 bundle）
+
+### 7. GitHub Actions Tag 自动发布 Release
+
+新增工作流：`.github/workflows/desktop-release.yml`
+
+- 触发条件：
+	- 推送 tag（例如 `v1.0.1`）
+	- 手动触发（`workflow_dispatch`）
+- 执行内容：
+	- 跨平台构建 Tauri 桌面包（macOS / Linux / Windows）
+	- 自动创建/更新对应 GitHub Release 并上传安装包

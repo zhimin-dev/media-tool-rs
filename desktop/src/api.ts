@@ -114,6 +114,20 @@ export async function getApiConnectionStatus(): Promise<ApiConnectionStatus> {
   }
 }
 
+export async function getAppVersion(): Promise<string> {
+  if (!inTauriRuntime()) {
+    return import.meta.env.VITE_APP_VERSION ?? 'dev'
+  }
+
+  try {
+    const tauriCore = await import('@tauri-apps/api/core')
+    const version = await tauriCore.invoke<string>('app_version')
+    return version || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 export async function fetchTasks(kind?: TaskKind): Promise<TaskRecord[]> {
   const search = kind ? `?kind=${encodeURIComponent(kind)}` : ''
   const response = await apiFetch(`/tasks${search}`)

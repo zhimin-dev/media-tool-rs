@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "media-tool-rs",
-  "version": "0.0.0",
+  "productName": "Media Tool",
+  "version": "1.0.0",
   "identifier": "com.wj.mediatoolrs",
   "build": {
     "beforeDevCommand": "npm run dev:with-server:tauri",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "media-tool-rs",
+        "title": "Media Tool",
         "width": 1200,
         "height": 800,
         "resizable": true

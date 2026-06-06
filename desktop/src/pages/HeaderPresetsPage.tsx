@@ -1,8 +1,12 @@
-import { Alert, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, TextField, Typography } from '@mui/material'
+import { useMemo } from 'react'
+import type { ApiConnectionStatus } from '../api'
 import HeaderRowFields from '../components/HeaderRowFields'
 import type { HeaderPreset, HeaderRow } from '../types'
 
 type HeaderPresetsPageProps = {
+  apiStatus: ApiConnectionStatus
+  appVersion: string
   headerPresets: HeaderPreset[]
   presetDialogOpen: boolean
   editingPresetHost: string
@@ -22,6 +26,8 @@ type HeaderPresetsPageProps = {
 }
 
 function HeaderPresetsPage({
+  apiStatus,
+  appVersion,
   headerPresets,
   presetDialogOpen,
   editingPresetHost,
@@ -39,42 +45,77 @@ function HeaderPresetsPage({
   onEditPreset,
   onDeletePreset,
 }: HeaderPresetsPageProps) {
+  const apiHost = useMemo(() => apiStatus.apiBase.replace(/\/api\/?$/, ''), [apiStatus.apiBase])
+
   return (
     <Stack spacing={2}>
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={2}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}>
-            <Typography variant="h6">Header 预设列表</Typography>
-            <Button variant="outlined" onClick={onOpenNewPreset}>
-              新建预设
-            </Button>
+          <Typography variant="h6">设置</Typography>
+          <Stack spacing={2}>
+            <Alert severity={apiStatus.healthy ? 'success' : 'warning'}>
+              {apiStatus.healthy ? '后端接口连接正常' : '后端接口连接异常'}
+            </Alert>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                App 版本
+              </Typography>
+              <Typography variant="body1" sx={{ fontFamily: 'monospace' }}>
+                {appVersion}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                当前 API Host
+              </Typography>
+              <Typography variant="body1" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                {apiHost}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                连接信息
+              </Typography>
+              <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                {apiStatus.message}
+              </Typography>
+            </Box>
           </Stack>
-          {headerPresets.length === 0 ? (
-            <Alert severity="info">暂无预设</Alert>
-          ) : (
-            <Stack spacing={1}>
-              {headerPresets.map((preset) => (
-                <Card key={preset.host} variant="outlined">
-                  <CardContent>
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle1">{preset.host}</Typography>
-                      <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                        {JSON.stringify(preset.headers)}
-                      </Typography>
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                        <Button variant="outlined" size="small" onClick={() => onEditPreset(preset)}>
-                          编辑
-                        </Button>
-                        <Button color="error" variant="outlined" size="small" onClick={() => onDeletePreset(preset.host)}>
-                          删除
-                        </Button>
-                      </Stack>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ))}
+
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}>
+              <Typography variant="h6">Header 预设列表</Typography>
+              <Button variant="outlined" onClick={onOpenNewPreset}>
+                新建预设
+              </Button>
             </Stack>
-          )}
+            {headerPresets.length === 0 ? (
+              <Alert severity="info">暂无预设</Alert>
+            ) : (
+              <Stack spacing={1}>
+                {headerPresets.map((preset) => (
+                  <Card key={preset.host} variant="outlined">
+                    <CardContent>
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle1">{preset.host}</Typography>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                          {JSON.stringify(preset.headers)}
+                        </Typography>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                          <Button variant="outlined" size="small" onClick={() => onEditPreset(preset)}>
+                            编辑
+                          </Button>
+                          <Button color="error" variant="outlined" size="small" onClick={() => onDeletePreset(preset.host)}>
+                            删除
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            )}
+          </Stack>
         </Stack>
       </Paper>
       <Dialog open={presetDialogOpen} onClose={onClosePresetDialog} fullWidth maxWidth="sm">

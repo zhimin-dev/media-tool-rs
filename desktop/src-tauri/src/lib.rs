@@ -23,6 +23,11 @@ fn api_base() -> Result<String, String> {
   read_api_base_from_runtime_file().ok_or_else(|| "embedded api is not ready".to_string())
 }
 
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+  app.package_info().version.to_string()
+}
+
 fn read_api_base_from_runtime_file() -> Option<String> {
   let current_dir = env::current_dir().ok()?;
   let runtime_file = current_dir
@@ -67,7 +72,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![api_base])
+    .invoke_handler(tauri::generate_handler![api_base, app_version])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
