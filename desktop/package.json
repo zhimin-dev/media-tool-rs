@@ -6,18 +6,18 @@
   "scripts": {
     "dev": "vite",
     "dev:with-server": "node ./scripts/dev-with-server.mjs",
-    "dev:with-server:tauri": "MEDIA_TOOL_STRICT_PORT=true node ./scripts/dev-with-server.mjs",
-    "tauri": "tauri",
+    "dev:with-server:tauri": "node ./scripts/dev-with-server.mjs --strict-port",
+    "tauri": "set CL=/FS&& set CFLAGS=/FS&& tauri",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.1",
+    "@tauri-apps/api": "^2.11.0",
     "internal-ip": "^7.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@rolldown/binding-win32-x64-msvc": "^1.1.0",
     "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",

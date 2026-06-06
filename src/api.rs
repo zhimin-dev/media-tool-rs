@@ -237,6 +237,7 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
     let addr = listener.local_addr()?;
     let actual_port = addr.port();
     let state = web::Data::new(AppState::new());
+    ensure_static_dirs();
     write_runtime_server_info(actual_port);
 
     println!(
@@ -280,6 +281,23 @@ pub async fn run_server(port: u16) -> std::io::Result<()> {
     .listen(listener)?
     .run()
     .await
+}
+
+fn ensure_static_dirs() {
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            println!("failed to resolve current dir for static dirs: {}", error);
+            return;
+        }
+    };
+
+    for relative in ["static", "static/download", "static/cut", "static/uploads"] {
+        let path = current_dir.join(relative);
+        if let Err(error) = fs::create_dir_all(&path) {
+            println!("failed to create static dir {}: {}", path.display(), error);
+        }
+    }
 }
 
 fn write_runtime_server_info(port: u16) {
