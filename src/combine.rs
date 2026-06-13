@@ -283,18 +283,55 @@ pub mod parse {
         Ok(res)
     }
 
-    #[allow(dead_code)]
+    /// SAMPLE-AES 解密并合并。
+    ///
+    /// 与 AES-128 的主要区别：IV 需要按 HLS 规范从 MediaSequence 逐段派生。
+    /// 每个分片的 IV = base_IV + (segment_index - sequence)，128 位大端无符号加法。
     async fn combine_with_simple_aes(
-        reg_name: String,
         reg_start: i32,
         reg_end: i32,
         target_name: String,
         key: String,
         iv: String,
         sequence: i32,
+        extension: String,
+        source_dir: PathBuf,
     ) -> Result<bool, Error> {
-        // 未实现
-        Ok(false)
+        let key_file = format!("./{}.bin", key.clone());
+        println!("SAMPLE-AES key file: {}, iv: {}", key_file.clone(), iv.clone());
+        let key_data = read(key_file).expect("打开 key 文件失败");
+        let slice: &[u8] = &key_data;
+
+        let files =
+            get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
+                .expect("解析分片列表失败");
+
+        // 解析 base IV（HLS 中 IV 是以 0x 开头的 128-bit 十六进制字符串）
+        let base_iv_u128 = if iv.is_empty() {
+            sequence as u128
+        } else {
+            let hex_str = iv.trim_start_matches("0x");
+            u128::from_str_radix(hex_str, 16).unwrap_or(sequence as u128)
+        };
+
+        let mut seg_idx = sequence;
+        for f in files.clone() {
+            let seg_offset = (seg_idx - sequence) as u128;
+            let seg_iv_u128 = base_iv_u128.wrapping_add(seg_offset);
+            let seg_iv_bytes: [u8; 16] = seg_iv_u128.to_be_bytes();
+
+            decrypt_video_file(slice, &seg_iv_bytes, seg_idx as u8, &f).await;
+            seg_idx += 1;
+        }
+
+        combine_without_crypto(
+            "decrypted-(.*).ts".to_string(),
+            reg_start,
+            reg_end,
+            target_name,
+            source_dir,
+        )
+        .await
     }
 
     async fn decrypt_video_file(key: &[u8], iv: &[u8], sequence_number: u8, segment_url: &str) {
@@ -465,15 +502,16 @@ pub mod parse {
                 .await
             }
             Some(HlsM3u8Method::SampleAes) => {
-                println!("simple aes");
+                println!("SAMPLE-AES decode");
                 combine_with_simple_aes(
-                    reg_name,
                     reg_start,
                     reg_end,
                     target_name,
                     key.clone(),
                     iv.clone(),
                     sequence,
+                    extension.clone(),
+                    source_dir,
                 )
                 .await
             }
