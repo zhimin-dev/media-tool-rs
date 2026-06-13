@@ -664,7 +664,11 @@ function App() {
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar sx={{ justifyContent: 'space-between', borderBottom: 1, borderColor: 'divider' }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <IconButton onClick={(event) => setMenuAnchor(event.currentTarget)} color="primary">
+            <IconButton
+              onClick={(event) => setMenuAnchor(event.currentTarget)}
+              onMouseEnter={(event) => setMenuAnchor(event.currentTarget)}
+              color="primary"
+            >
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -674,7 +678,16 @@ function App() {
         </Toolbar>
       </AppBar>
 
-      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={() => setMenuAnchor(null)}
+        slotProps={{
+          list: {
+            onMouseLeave: () => setMenuAnchor(null),
+          },
+        }}
+      >
         {appPages.map((page) => (
           <MenuItem key={page.key} selected={page.key === currentPage} onClick={() => handleMenuNavigate(page)}>
             {page.label}
