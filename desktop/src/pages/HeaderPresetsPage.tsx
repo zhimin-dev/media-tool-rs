@@ -181,7 +181,7 @@ function HeaderPresetsPage({
             <TextField
               fullWidth
               label="预设 Host"
-              placeholder="例如 surrit.com"
+              placeholder="例如 zmis.me"
               value={presetFormHost}
               onChange={(event) => onPresetFormHostChange(event.target.value)}
               helperText={matchedPresetHost ? `当前下载链接 host：${matchedPresetHost}` : undefined}
