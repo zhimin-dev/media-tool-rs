@@ -22,7 +22,8 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.16.0",
-    "video.js": "^8.23.7"
+    "video.js": "^8.23.7",
+    "@videojs/http-streaming": "^3.17.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
