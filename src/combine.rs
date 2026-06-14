@@ -168,8 +168,21 @@ pub mod parse {
             let mut width = 1280;
             let mut height = 720;
             if same_param_index != -1 {
-                let info =
-                    get_video_info(&files.get(same_param_index as usize).unwrap().to_string());
+                let reference_file = match files.get(same_param_index as usize) {
+                    Some(f) => f.to_string(),
+                    None => {
+                        println!(
+                            "[combine_video] 错误：same_param_index {} 超出 files 范围 (0..{})",
+                            same_param_index,
+                            files.len()
+                        );
+                        if let Some(dir) = prev_dir {
+                            let _ = std::env::set_current_dir(dir);
+                        }
+                        return Ok(false);
+                    }
+                };
+                let info = get_video_info(&reference_file);
                 match info {
                     Some(data_info) => {
                         if data_info.audio_rate > 0 {
@@ -385,7 +398,7 @@ pub mod parse {
         if let Some(dir) = prev_dir {
             let _ = std::env::set_current_dir(dir);
         }
-        Ok(res.expect("合并文件失败"))
+        res
     }
 
     /// SAMPLE-AES 解密并合并。
@@ -418,12 +431,26 @@ pub mod parse {
             return Ok(false);
         }
 
-        let key_data = read(&key_file).expect("打开 key 文件失败");
+        let key_data = match read(&key_file) {
+            Ok(data) => data,
+            Err(e) => {
+                println!("[combine_simple_aes] 打开 key 文件失败: {}", e);
+                return Ok(false);
+            }
+        };
         let slice: &[u8] = &key_data;
 
-        let files =
-            get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
-                .expect("解析分片列表失败");
+        let files = match get_reg_files(
+            format!("(.*).{}", extension.clone()),
+            reg_start,
+            reg_end,
+        ) {
+            Ok(f) => f,
+            Err(_) => {
+                println!("[combine_simple_aes] 解析分片列表失败");
+                return Ok(false);
+            }
+        };
 
         // 检查所有输入文件是否存在
         for f in &files {
@@ -450,7 +477,10 @@ pub mod parse {
             let seg_iv_u128 = base_iv_u128.wrapping_add(seg_offset);
             let seg_iv_bytes: [u8; 16] = seg_iv_u128.to_be_bytes();
 
-            decrypt_video_file(slice, &seg_iv_bytes, seg_idx as u8, &f).await;
+            if let Err(e) = decrypt_video_file(slice, &seg_iv_bytes, seg_idx as u8, &f).await {
+                println!("[combine_simple_aes] 解密失败 segment {}: {}", seg_idx, e);
+                return Ok(false);
+            }
             seg_idx += 1;
         }
 
@@ -464,25 +494,26 @@ pub mod parse {
         .await
     }
 
-    async fn decrypt_video_file(key: &[u8], iv: &[u8], sequence_number: u8, segment_url: &str) {
-        let mut file = File::open(segment_url).expect("文件不存在");
+    async fn decrypt_video_file(key: &[u8], iv: &[u8], sequence_number: u8, segment_url: &str) -> Result<(), String> {
+        let mut file = File::open(segment_url).map_err(|e| format!("文件不存在 {}: {}", segment_url, e))?;
         let mut file_data = Vec::new();
-        let _ = file.read_to_end(&mut file_data).expect("读文件失败");
+        file.read_to_end(&mut file_data).map_err(|e| format!("读文件失败 {}: {}", segment_url, e))?;
 
         let cipher = Cipher::aes_128_cbc();
         let decrypted_data =
-            decrypt(cipher, &key, Some(&iv), &file_data.as_slice()).expect("解析失败");
+            decrypt(cipher, key, Some(iv), &file_data.as_slice()).map_err(|e| format!("解密失败: {}", e))?;
 
         let file_name = format!("decrypted-{}.ts", sequence_number);
         let mut file = match File::create(&file_name) {
-            Err(why) => panic!("couldn't create: {}", why),
+            Err(why) => return Err(format!("couldn't create {}: {}", file_name, why)),
             Ok(file) => file,
         };
 
         match file.write_all(&decrypted_data) {
-            Err(why) => panic!("couldn't write to: {}", why),
+            Err(why) => return Err(format!("couldn't write to {}: {}", file_name, why)),
             Ok(_) => println!("successfully wrote to {}", &file_name),
         }
+        Ok(())
     }
 
     async fn combine_with_aes_128(
@@ -507,13 +538,24 @@ pub mod parse {
             return Ok(false);
         }
 
-        let key_data = read(&key_file).expect("打开文件失败");
+        let key_data = match read(&key_file) {
+            Ok(data) => data,
+            Err(e) => {
+                println!("[combine_with_aes_128] 打开文件失败: {}", e);
+                return Ok(false);
+            }
+        };
         println!("----映射的文件大小: {}", key_data.len());
         let slice: &[u8] = &key_data;
         println!("----映射的文件大小: {} {}", key_data.len(), slice.len());
 
-        let files = get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
-            .expect("解析失败");
+        let files = match get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end) {
+            Ok(f) => f,
+            Err(_) => {
+                println!("[combine_with_aes_128] 解析分片列表失败");
+                return Ok(false);
+            }
+        };
 
         // 检查所有输入文件是否存在
         for f in &files {
@@ -542,12 +584,24 @@ pub mod parse {
     }
 
     fn append_file_to_output(input_path: &str, output: &mut BufWriter<File>) -> Result<(), Error> {
-        let input_file = File::open(input_path).expect("open file error");
+        let input_file = match File::open(input_path) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("open file error {}: {}", input_path, e);
+                return Err(Error);
+            }
+        };
         let mut reader = BufReader::new(input_file);
         let mut buffer = Vec::new();
 
-        reader.read_to_end(&mut buffer).expect("read to end error");
-        output.write_all(&buffer).expect("write all error");
+        if let Err(e) = reader.read_to_end(&mut buffer) {
+            println!("read to end error {}: {}", input_path, e);
+            return Err(Error);
+        }
+        if let Err(e) = output.write_all(&buffer) {
+            println!("write all error: {}", e);
+            return Err(Error);
+        }
         Ok(())
     }
 
@@ -561,12 +615,18 @@ pub mod parse {
         source_dir: PathBuf,
     ) -> Result<bool, Error> {
         // 输出文件，覆盖或创建新文件
-        let output_file = OpenOptions::new()
+        let output_file = match OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(resolve_output_path(&source_dir, target_name.clone()))
-            .expect("create file error");
+        {
+            Ok(f) => f,
+            Err(e) => {
+                println!("create file error: {}", e);
+                return Ok(false);
+            }
+        };
 
         let mut writer = BufWriter::new(output_file);
 
@@ -576,7 +636,13 @@ pub mod parse {
             files.push(format!("-1.{}", extension.clone()));
         }
 
-        let reg_files = get_reg_files(reg_name.clone(), reg_start, reg_end).expect("解析失败");
+        let reg_files = match get_reg_files(reg_name.clone(), reg_start, reg_end) {
+            Ok(f) => f,
+            Err(_) => {
+                println!("m4s_file_combine 解析分片列表失败");
+                return Ok(false);
+            }
+        };
         for i in reg_files.clone() {
             files.push(i.clone());
         }
@@ -586,7 +652,13 @@ pub mod parse {
             append_file_to_output(file, &mut writer)?;
         }
 
-        writer.flush().expect("flush error");
+        match writer.flush() {
+            Ok(_) => {}
+            Err(e) => {
+                println!("flush error: {}", e);
+                return Ok(false);
+            }
+        }
         println!("合并完成：output.mp4");
 
         Ok(true)

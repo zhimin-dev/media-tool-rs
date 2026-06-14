@@ -87,9 +87,9 @@ pub mod cmd {
 
     pub fn cut(file: String, start: u32, duration: u32, target: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
-        let output = Command::new("ffmpeg")
+        let output = match Command::new("ffmpeg")
             .arg("-i")
-            .arg(file)
+            .arg(&file)
             .arg("-ss")
             .arg(start.to_string())
             .arg("-t")
@@ -98,9 +98,15 @@ pub mod cmd {
             .arg("libx264")
             .arg("-c:a")
             .arg("aac")
-            .arg(target_with_ext)
+            .arg(&target_with_ext)
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("ffmpeg 执行失败（截取）: {}", e);
+                return Err(Error);
+            }
+        };
         if output.status.success() {
             Ok(true)
         } else {
@@ -150,16 +156,22 @@ pub mod cmd {
 
     pub fn download(url: String, file_name: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&file_name, "mp4");
-        let output = Command::new("ffmpeg")
+        let output = match Command::new("ffmpeg")
             .arg("-i")
-            .arg(url.to_owned())
+            .arg(&url)
             .arg("-c")
             .arg("copy")
             .arg("-bsf:a")
             .arg("aac_adtstoasc")
-            .arg(target_with_ext)
+            .arg(&target_with_ext)
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("ffmpeg 执行失败（下载）: {}", e);
+                return Err(Error);
+            }
+        };
         if output.status.success() {
             Ok(true)
         } else {
@@ -189,19 +201,25 @@ pub mod cmd {
         );
         println!("[combine] CMD: {}", cmd);
 
-        let output = Command::new("ffmpeg")
+        let output = match Command::new("ffmpeg")
             .arg("-y")
             .arg("-f")
             .arg("concat")
             .arg("-safe")
             .arg("0")
             .arg("-i")
-            .arg(file)
+            .arg(&file)
             .arg("-c")
             .arg("copy")
-            .arg(target_with_ext)
+            .arg(&target_with_ext)
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("[combine] ffmpeg 执行失败: {}", e);
+                return Err(Error);
+            }
+        };
         if output.status.success() {
             Ok(true)
         } else {
@@ -223,9 +241,9 @@ pub mod cmd {
         height: i32,
     ) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
-        let output = Command::new("ffmpeg")
+        let output = match Command::new("ffmpeg")
             .arg("-i")
-            .arg(file)
+            .arg(&file)
             .arg("-vf")
             .arg(format!("scale={}:{}", width, height))
             .arg("-b:v")
@@ -235,12 +253,18 @@ pub mod cmd {
             .arg("-r")
             .arg(fps.to_string())
             .arg("-c:v")
-            .arg("libx264".to_string())
+            .arg("libx264")
             .arg("-c:a")
-            .arg("aac".to_string())
-            .arg(target_with_ext)
+            .arg("aac")
+            .arg(&target_with_ext)
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("ffmpeg 执行失败（转码）: {}", e);
+                return Err(Error);
+            }
+        };
         if output.status.success() {
             Ok(true)
         } else {
@@ -270,7 +294,7 @@ pub mod cmd {
         );
         println!("[combine_ts] CMD: {}", cmd1);
 
-        let output = Command::new("ffmpeg")
+        let output = match Command::new("ffmpeg")
             .arg("-y")
             .arg("-f")
             .arg("concat")
@@ -282,7 +306,13 @@ pub mod cmd {
             .arg("copy")
             .arg(&target_with_ext)
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("[combine_ts] ffmpeg 执行失败: {}", e);
+                return Err(Error);
+            }
+        };
 
         if output.status.success() {
             Ok(true)
@@ -294,12 +324,18 @@ pub mod cmd {
     }
 
     pub fn check_video_validity(file_path: &str) -> Result<bool, Error> {
-        let output = Command::new("ffprobe")
+        let output = match Command::new("ffprobe")
             .args(&["-v", "error", "-show_format", "-show_streams"])
             .arg(file_path)
             .stderr(Stdio::piped())
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("ffprobe 执行失败（校验视频有效性）: {}", e);
+                return Err(Error);
+            }
+        };
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         Ok(stderr.trim().is_empty())
@@ -326,7 +362,7 @@ pub mod cmd {
     pub fn get_video_info(file: &str) -> Option<VideoInfo> {
         println!("pass file name： {}---", file);
         let mut ffprobe = Command::new("ffprobe");
-        let prob_result = ffprobe
+        let prob_result = match ffprobe
             .arg("-v")
             .arg("quiet")
             .arg("-print_format")
@@ -335,12 +371,29 @@ pub mod cmd {
             .arg("-show_streams")
             .arg(file.to_owned())
             .output()
-            .unwrap();
+        {
+            Ok(out) => out,
+            Err(e) => {
+                println!("ffprobe 执行失败（获取视频信息）: {}", e);
+                return None;
+            }
+        };
         println!("ffmpeg status : {}", prob_result.status);
         if prob_result.status.success() {
-            let res_data: Ffprobe =
-                serde_json::from_str(String::from_utf8(prob_result.stdout).unwrap().as_str())
-                    .expect("无法解析 JSON");
+            let stdout_str = match String::from_utf8(prob_result.stdout) {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("ffprobe 输出解析失败: {}", e);
+                    return None;
+                }
+            };
+            let res_data: Ffprobe = match serde_json::from_str(&stdout_str) {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("无法解析 JSON: {}", e);
+                    return None;
+                }
+            };
             let video_info: VideoInfo = res_data.into();
             Some(video_info)
         } else {
