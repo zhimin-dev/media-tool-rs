@@ -63,17 +63,13 @@ pub mod parse {
     }
 
     pub fn to_files(base_dir: &Path) -> Result<String, Error> {
-        to_files_named(base_dir, "list")
-    }
-
-    /// 使用固定名称生成 txt 文件路径，避免每次合并都重建
-    pub fn to_files_named(base_dir: &Path, name: &str) -> Result<String, Error> {
+        // 固定使用 list.txt，不再生成随机文件名
+        let list_path = base_dir.join("list.txt");
         if let Err(error) = fs::create_dir_all(base_dir) {
             println!("创建目录失败 {}: {}", base_dir.display(), error);
-            return Ok(format!("{}.txt", now()));
+            return Ok(list_path.display().to_string());
         }
-        let file = base_dir.join(format!("{}.txt", name));
-        Ok(file.display().to_string())
+        Ok(list_path.display().to_string())
     }
 
     pub fn white_to_files(files: Vec<String>, file_name: String) -> Result<bool, Error> {
@@ -126,7 +122,31 @@ pub mod parse {
             return Ok(false);
         }
 
-        if same_param_index == -1
+        // 检查所有输入文件是否存在
+        for f in &files {
+            if !Path::new(f).exists() {
+                println!(
+                    "[combine_video] 错误：输入文件不存在: {}",
+                    f
+                );
+                return Ok(false);
+            }
+        }
+
+        // 进入 source_dir，确保 ffmpeg 能找到相对路径的文件
+        let prev_dir = std::env::current_dir().ok();
+        if let Err(e) = std::env::set_current_dir(&source_dir) {
+            println!(
+                "[combine_video] 无法进入目录 {}: {}",
+                source_dir.display(),
+                e
+            );
+            return Ok(false);
+        }
+        println!("[combine_video] 已进入工作目录: {}", source_dir.display());
+
+        // 保存返回值，确保无论如何都恢复目录
+        let result = if same_param_index == -1
             && set_a_b == 0
             && set_v_b == 0
             && set_fps == 0
@@ -135,72 +155,87 @@ pub mod parse {
         {
             let wrote = white_to_files(files.clone(), file_name.clone()).unwrap_or(false);
             if !wrote {
-                return Ok(false);
-            }
-            let target = resolve_output_path(&source_dir, target_file_name);
-            return combine(file_name.clone(), target);
-        }
-        // 如果不指定视频参数相同的索引，那么就按照传过来的参数处理
-        let mut a_b = 128000; // audio bitrate
-        let mut v_b = 1200000; // video bitrate
-        let mut fps = 30; // fps
-        let mut width = 1280; // width
-        let mut height = 720; // height
-        if same_param_index != -1 {
-            let info = get_video_info(&files.get(same_param_index as usize).unwrap().to_string());
-            match info {
-                Some(data_info) => {
-                    if data_info.audio_rate > 0 {
-                        a_b = data_info.audio_rate;
-                    }
-                    if data_info.fps > 0.0 {
-                        fps = data_info.fps as i32;
-                    }
-                    if data_info.video_rate > 0 {
-                        v_b = data_info.video_rate;
-                    }
-                    if data_info.width > 0 {
-                        width = data_info.width;
-                    }
-                    if data_info.height > 0 {
-                        height = data_info.height;
-                    }
-                }
-                None => return Ok(false),
+                Err(Error::default())
+            } else {
+                let target = resolve_output_path(&source_dir, target_file_name);
+                combine(file_name.clone(), target)
             }
         } else {
-            if set_a_b > 0 {
-                a_b = set_a_b;
+            // 如果不指定视频参数相同的索引，那么就按照传过来的参数处理
+            let mut a_b = 128000;
+            let mut v_b = 1200000;
+            let mut fps = 30;
+            let mut width = 1280;
+            let mut height = 720;
+            if same_param_index != -1 {
+                let info =
+                    get_video_info(&files.get(same_param_index as usize).unwrap().to_string());
+                match info {
+                    Some(data_info) => {
+                        if data_info.audio_rate > 0 {
+                            a_b = data_info.audio_rate;
+                        }
+                        if data_info.fps > 0.0 {
+                            fps = data_info.fps as i32;
+                        }
+                        if data_info.video_rate > 0 {
+                            v_b = data_info.video_rate;
+                        }
+                        if data_info.width > 0 {
+                            width = data_info.width;
+                        }
+                        if data_info.height > 0 {
+                            height = data_info.height;
+                        }
+                    }
+                    None => {
+                        // 恢复目录后再返回
+                        if let Some(dir) = prev_dir {
+                            let _ = std::env::set_current_dir(dir);
+                        }
+                        return Ok(false);
+                    }
+                }
+            } else {
+                if set_a_b > 0 {
+                    a_b = set_a_b;
+                }
+                if set_fps > 0 {
+                    fps = set_fps;
+                }
+                if set_v_b > 0 {
+                    v_b = set_v_b;
+                }
+                if set_width > 0 {
+                    width = set_width
+                }
+                if set_height > 0 {
+                    height = set_height
+                }
             }
-            if set_fps > 0 {
-                fps = set_fps;
-            }
-            if set_v_b > 0 {
-                v_b = set_v_b;
-            }
-            if set_width > 0 {
-                width = set_width
-            }
-            if set_height > 0 {
-                height = set_height
-            }
+            println!(
+                "ab {} vb {}  fps {} width {} height {}",
+                a_b, v_b, fps, width, height
+            );
+            let target = resolve_output_path(&source_dir, target_file_name);
+            transcode_videos_to_same_params(
+                files.clone(),
+                file_name.clone(),
+                target,
+                source_dir,
+                a_b,
+                v_b,
+                fps,
+                width,
+                height,
+            )
+        };
+
+        // 恢复之前的工作目录
+        if let Some(dir) = prev_dir {
+            let _ = std::env::set_current_dir(dir);
         }
-        println!(
-            "ab {} vb {}  fps {} width {} height {}",
-            a_b, v_b, fps, width, height
-        );
-        let target = resolve_output_path(&source_dir, target_file_name);
-        transcode_videos_to_same_params(
-            files.clone(),
-            file_name.clone(),
-            target,
-            source_dir,
-            a_b,
-            v_b,
-            fps,
-            width,
-            height,
-        )
+        result
     }
 
     // cargo run -- combine -r="/Users/meow.zang/RustroverProjects/ffmpeg-tool-rs/images/video/(.*).mp4" --reg-file-start=1 --reg-file-end=2 --same_param_index=1
@@ -275,17 +310,82 @@ pub mod parse {
         source_dir: PathBuf,
     ) -> Result<bool, Error> {
         let files = get_reg_files(reg_name.clone(), reg_start, reg_end).expect("解析失败");
-        let file_name = to_files(&source_dir).expect("生成文件失败");
-        let mut target = source_dir.join(get_reg_file_name(reg_name.to_owned())).display().to_string();
-        if !target_name.is_empty() {
-            target = resolve_output_path(&source_dir, target_name.clone());
+
+        // 解析为绝对路径，避免 cd 后路径混乱
+        let abs_source_dir = source_dir
+            .canonicalize()
+            .unwrap_or_else(|_| source_dir.clone());
+        let concat_list_path = abs_source_dir.join("list.txt");
+
+        println!(
+            "[combine_without_crypto] 将生成 concat 列表: {}",
+            concat_list_path.display()
+        );
+
+        // 检查所有输入文件是否存在
+        for f in &files {
+            if !Path::new(f).exists() {
+                println!(
+                    "[combine_without_crypto] 错误：输入文件不存在: {}",
+                    f
+                );
+                return Ok(false);
+            }
         }
-        let wrote = white_to_files(files.clone(), file_name.clone()).unwrap_or(false);
+
+        let wrote = white_to_files(files.clone(), concat_list_path.display().to_string())
+            .unwrap_or(false);
         if !wrote {
+            println!(
+                "[combine_without_crypto] 错误：生成 concat 列表失败: {}",
+                concat_list_path.display()
+            );
             return Ok(false);
         }
-        let res = combine_ts(file_name.clone(), target).expect("合并文件失败");
-        Ok(res)
+
+        // 验证 concat 列表确实已生成
+        if !concat_list_path.exists() {
+            println!(
+                "[combine_without_crypto] 错误：concat 列表文件未生成: {}",
+                concat_list_path.display()
+            );
+            return Ok(false);
+        }
+        println!(
+            "[combine_without_crypto] concat 列表已生成 ({} bytes)",
+            concat_list_path.metadata().map(|m| m.len()).unwrap_or(0)
+        );
+
+        let mut target = abs_source_dir
+            .join(get_reg_file_name(reg_name.to_owned()))
+            .display()
+            .to_string();
+        if !target_name.is_empty() {
+            target = resolve_output_path(&abs_source_dir, target_name.clone());
+        }
+
+        // 进入 source_dir 目录执行 ffmpeg
+        let prev_dir = std::env::current_dir().ok();
+        if let Err(e) = std::env::set_current_dir(&abs_source_dir) {
+            println!(
+                "[combine_without_crypto] 无法进入目录 {}: {}",
+                abs_source_dir.display(),
+                e
+            );
+            return Ok(false);
+        }
+        println!(
+            "[combine_without_crypto] 已进入工作目录: {}",
+            abs_source_dir.display()
+        );
+
+        let res = combine_ts("list.txt".to_string(), target);
+
+        // 恢复之前的工作目录
+        if let Some(dir) = prev_dir {
+            let _ = std::env::set_current_dir(dir);
+        }
+        Ok(res.expect("合并文件失败"))
     }
 
     /// SAMPLE-AES 解密并合并。
@@ -302,14 +402,39 @@ pub mod parse {
         extension: String,
         source_dir: PathBuf,
     ) -> Result<bool, Error> {
-        let key_file = format!("./{}.bin", key.clone());
-        println!("SAMPLE-AES key file: {}, iv: {}", key_file.clone(), iv.clone());
-        let key_data = read(key_file).expect("打开 key 文件失败");
+        // 使用绝对路径访问 key 文件
+        let key_file = source_dir.join(format!("{}.bin", key));
+        println!(
+            "SAMPLE-AES key file: {}, iv: {}",
+            key_file.display(),
+            iv.clone()
+        );
+
+        if !key_file.exists() {
+            println!(
+                "[combine_simple_aes] 错误：key 文件不存在: {}",
+                key_file.display()
+            );
+            return Ok(false);
+        }
+
+        let key_data = read(&key_file).expect("打开 key 文件失败");
         let slice: &[u8] = &key_data;
 
         let files =
             get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
                 .expect("解析分片列表失败");
+
+        // 检查所有输入文件是否存在
+        for f in &files {
+            if !Path::new(f).exists() {
+                println!(
+                    "[combine_simple_aes] 错误：输入文件不存在: {}",
+                    f
+                );
+                return Ok(false);
+            }
+        }
 
         // 解析 base IV（HLS 中 IV 是以 0x 开头的 128-bit 十六进制字符串）
         let base_iv_u128 = if iv.is_empty() {
@@ -370,14 +495,37 @@ pub mod parse {
         extension: String,
         source_dir: PathBuf,
     ) -> Result<bool, Error> {
-        let key_file = format!("./{}.bin", key.clone());
-        println!("pass key {}, iv {}", key_file.clone(), iv.clone());
-        let key_data = read(key_file).expect("打开文件失败");
+        // 使用绝对路径访问 key 文件（确保不管在哪个目录执行都能找到）
+        let key_file = source_dir.join(format!("{}.bin", key));
+        println!("pass key {}, iv {}", key_file.display(), iv.clone());
+
+        if !key_file.exists() {
+            println!(
+                "[combine_with_aes_128] 错误：key 文件不存在: {}",
+                key_file.display()
+            );
+            return Ok(false);
+        }
+
+        let key_data = read(&key_file).expect("打开文件失败");
         println!("----映射的文件大小: {}", key_data.len());
-        let slice: &[u8] = &key_data; // 转为 &[u8]
+        let slice: &[u8] = &key_data;
         println!("----映射的文件大小: {} {}", key_data.len(), slice.len());
+
         let files = get_reg_files(format!("(.*).{}", extension.clone()), reg_start, reg_end)
             .expect("解析失败");
+
+        // 检查所有输入文件是否存在
+        for f in &files {
+            if !Path::new(f).exists() {
+                println!(
+                    "[combine_with_aes_128] 错误：输入文件不存在: {}",
+                    f
+                );
+                return Ok(false);
+            }
+        }
+
         let mut start_se = sequence;
         for i in files.clone() {
             let _ = decrypt_video_file(slice, iv.clone().as_bytes(), start_se as u8, &i).await;

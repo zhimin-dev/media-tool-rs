@@ -329,7 +329,7 @@ pub mod download {
                 hls_m3u.sequence,
                 hls_m3u.x_map_uri.clone(),
                 hls_m3u.extension.clone(),
-                PathBuf::from(folder.clone()),
+                PathBuf::from("."),
             )
             .await;
             attempt += 1;

@@ -172,6 +172,23 @@ pub mod cmd {
     //ffmpeg -f concat -i input.txt -c copy output.mp4
     pub fn combine(file: String, target: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
+
+        // 验证 concat 列表文件存在
+        let concat_path = Path::new(&file);
+        if !concat_path.exists() {
+            println!(
+                "[combine] 错误：concat 列表文件不存在: {}",
+                concat_path.display()
+            );
+            return Ok(false);
+        }
+
+        let cmd = format!(
+            "ffmpeg -y -f concat -safe 0 -i \"{}\" -c copy \"{}\"",
+            file, target_with_ext
+        );
+        println!("[combine] CMD: {}", cmd);
+
         let output = Command::new("ffmpeg")
             .arg("-y")
             .arg("-f")
@@ -236,11 +253,23 @@ pub mod cmd {
     //ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
     pub fn combine_ts(file: String, target: String) -> Result<bool, Error> {
         let target_with_ext = ensure_output_extension(&target, "mp4");
-        println!(
-            "{} file --- target {}",
-            file.clone(),
-            target_with_ext.clone()
+
+        // 验证 concat 列表文件存在
+        let concat_path = Path::new(&file);
+        if !concat_path.exists() {
+            println!(
+                "[combine_ts] 错误：concat 列表文件不存在: {}",
+                concat_path.display()
+            );
+            return Ok(false);
+        }
+
+        let cmd1 = format!(
+            "ffmpeg -y -f concat -safe 0 -i \"{}\" -c copy \"{}\"",
+            file, target_with_ext
         );
+        println!("[combine_ts] CMD: {}", cmd1);
+
         let output = Command::new("ffmpeg")
             .arg("-y")
             .arg("-f")
@@ -256,47 +285,10 @@ pub mod cmd {
             .unwrap();
 
         if output.status.success() {
-            return Ok(true);
-        }
-
-        println!("combine_ts copy failed, ffmpeg code: {}", output.status);
-        println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
-
-        // Windows 上 -c copy 可能因时间戳损坏导致 ACCESS_VIOLATION (0x00000005)，
-        // 此时回退到重新编码模式
-        println!("combine_ts: retrying with re-encode (no -c copy)...");
-
-        // 先删除损坏的输出文件
-        let _ = std::fs::remove_file(&target_with_ext);
-        let temp_target = format!("{}_reenc.mp4", target_with_ext.trim_end_matches(".mp4"));
-
-        let output2 = Command::new("ffmpeg")
-            .arg("-y")
-            .arg("-f")
-            .arg("concat")
-            .arg("-safe")
-            .arg("0")
-            .arg("-i")
-            .arg(&file)
-            .arg("-c:v")
-            .arg("libx264")
-            .arg("-preset")
-            .arg("ultrafast")
-            .arg("-c:a")
-            .arg("aac")
-            .arg(&temp_target)
-            .output()
-            .unwrap();
-
-        if output2.status.success() {
-            // 重命名到目标文件
-            let _ = std::fs::rename(&temp_target, &target_with_ext);
-            println!("combine_ts re-encode succeeded");
             Ok(true)
         } else {
-            println!("combine_ts re-encode also failed, ffmpeg code: {}", output2.status);
-            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output2.stderr));
-            let _ = std::fs::remove_file(&temp_target);
+            println!("combine_ts error, ffmpeg code: {}", output.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
             Ok(false)
         }
     }
