@@ -256,10 +256,47 @@ pub mod cmd {
             .unwrap();
 
         if output.status.success() {
+            return Ok(true);
+        }
+
+        println!("combine_ts copy failed, ffmpeg code: {}", output.status);
+        println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+        // Windows 上 -c copy 可能因时间戳损坏导致 ACCESS_VIOLATION (0x00000005)，
+        // 此时回退到重新编码模式
+        println!("combine_ts: retrying with re-encode (no -c copy)...");
+
+        // 先删除损坏的输出文件
+        let _ = std::fs::remove_file(&target_with_ext);
+        let temp_target = format!("{}_reenc.mp4", target_with_ext.trim_end_matches(".mp4"));
+
+        let output2 = Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-f")
+            .arg("concat")
+            .arg("-safe")
+            .arg("0")
+            .arg("-i")
+            .arg(&file)
+            .arg("-c:v")
+            .arg("libx264")
+            .arg("-preset")
+            .arg("ultrafast")
+            .arg("-c:a")
+            .arg("aac")
+            .arg(&temp_target)
+            .output()
+            .unwrap();
+
+        if output2.status.success() {
+            // 重命名到目标文件
+            let _ = std::fs::rename(&temp_target, &target_with_ext);
+            println!("combine_ts re-encode succeeded");
             Ok(true)
         } else {
-            println!("combine_ts error, ffmpeg code: {}", output.status);
-            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
+            println!("combine_ts re-encode also failed, ffmpeg code: {}", output2.status);
+            println!("ffmpeg stderr: {}", String::from_utf8_lossy(&output2.stderr));
+            let _ = std::fs::remove_file(&temp_target);
             Ok(false)
         }
     }

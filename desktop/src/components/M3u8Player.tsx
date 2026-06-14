@@ -1,7 +1,14 @@
 import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import videojs from 'video.js'
+// 确保 VHS 在 production build 中被正确包含（side-effect import）
 import '@videojs/http-streaming'
+
+// Prevent tree-shaking of VHS in production builds
+if (typeof window !== 'undefined') {
+  void (videojs as unknown as Record<string, unknown>)['vhs']
+}
+
 import 'video.js/dist/video-js.css'
 
 type M3u8PlayerProps = {
