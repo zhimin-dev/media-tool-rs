@@ -1,8 +1,11 @@
-# Media Tool
+<div align='center'>
+<img src="https://github.com/zhimin-dev/media-tool-rs/blob/master/desktop/public/favicon.svg" width="150" height="150" alt="logo" />
 
-一个多功能视频处理工具箱。无需安装复杂软件，下载、合并、剪辑、转码一站式搞定。
+Media Tool
 
-![Media Tool Icon](desktop/src-tauri/icons/icon.png)
+<sup>一个多功能视频处理工具箱。无需安装复杂软件，下载、合并、剪辑、转码一站式搞定。</sup>
+
+</div>
 
 ---
 
@@ -61,6 +64,14 @@
 - **Linux**：`.AppImage` / `.deb` 安装包
 
 安装包可在 [GitHub Releases](https://github.com/zmisgod/media-tool-rs/releases) 页面下载。
+
+> ⚠️ **macOS 用户注意**：如果安装后打不开 App，提示"无法验证开发者"或"已损坏"，请在终端执行以下命令清除隔离标记：
+> 
+> ```bash
+> xattr -cr /Applications/Media\ Tool.app
+> ```
+> 
+> 这是因为应用未经过 Apple 官方签名，macOS Gatekeeper 默认会阻止运行。
 
 ### ⌨️ 命令行
 
