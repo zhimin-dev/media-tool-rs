@@ -95,9 +95,15 @@ impl HlsM3u8 {
     }
 
     async fn convert_local_key(&mut self) {
+        let key_file = format!("./{}.bin", self.folder.clone());
+        // 如果密钥文件已存在，直接复用，不再下载
+        if std::path::Path::new(&key_file).exists() {
+            println!("密钥文件已存在，跳过下载: {}", key_file);
+            return;
+        }
         let res = download_file(
             self.key.clone(),
-            format!("./{}.bin", self.folder.clone()),
+            key_file,
             &self.headers,
         )
         .await;

@@ -63,11 +63,16 @@ pub mod parse {
     }
 
     pub fn to_files(base_dir: &Path) -> Result<String, Error> {
+        to_files_named(base_dir, "list")
+    }
+
+    /// 使用固定名称生成 txt 文件路径，避免每次合并都重建
+    pub fn to_files_named(base_dir: &Path, name: &str) -> Result<String, Error> {
         if let Err(error) = fs::create_dir_all(base_dir) {
             println!("创建目录失败 {}: {}", base_dir.display(), error);
             return Ok(format!("{}.txt", now()));
         }
-        let file = base_dir.join(format!("{}.txt", now()));
+        let file = base_dir.join(format!("{}.txt", name));
         Ok(file.display().to_string())
     }
 
